@@ -20,10 +20,12 @@ __all__ = ('intersection', 'difference', 'strtotuple',
            'interpolate', 'QueryDict',
            'platform', 'escape_markup', 'reify')
 
+import os, fnmatch
 from os import environ
 from sys import platform as _sys_platform
 from re import match, split
 
+CoreLabel = None
 
 def boundary(value, minvalue, maxvalue):
     '''Limit a value between a minvalue and maxvalue.'''
@@ -38,6 +40,21 @@ def intersection(set1, set2):
 def difference(set1, set2):
     '''Return the difference between 2 lists.'''
     return [s for s in set1 if s not in set2]
+
+def get_font_list(filter='*.ttf'):
+    '''Get a list of all the fonts available on this system.
+    '''
+    global CoreLabel
+    if not CoreLabel:
+        from kivy.core.text import Label as CoreLabel
+    fonts_path = CoreLabel.get_system_fonts_dir()
+    flist = []
+
+    for fdir in fonts_path:
+        for folder, subs, files in os.walk(fdir):
+            for font in fnmatch.filter(files, filter):
+                flist.append(font.split('.')[0])
+    return sorted(flist)
 
 
 def interpolate(value_from, value_to, step=10):

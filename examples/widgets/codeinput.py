@@ -1,5 +1,7 @@
 from kivy.app import App
 from kivy.extras.highlight import KivyLexer
+from kivy.metrics import sp
+from kivy.utils import get_font_list
 from kivy.uix.spinner import Spinner, SpinnerOption
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.codeinput import CodeInput
@@ -7,7 +9,6 @@ from kivy.uix.popup import Popup
 from kivy.properties import ListProperty
 from kivy.core.window import Window
 from pygments import lexers
-from pygame import font as fonts
 import codecs
 import os
 
@@ -109,7 +110,7 @@ class CodeInputTest(App):
         fnt_name = Spinner(
             text='DroidSansMono',
             option_cls=Fnt_SpinnerOption,
-            values=sorted(map(str, fonts.get_fonts())))
+            values=sorted(map(str, get_font_list())))
         fnt_name.bind(text=self._update_font)
         mnu_file = Spinner(
             text='File',
@@ -124,7 +125,7 @@ class CodeInputTest(App):
 
         self.codeinput = CodeInput(
             lexer=KivyLexer(),
-            font_name='data/fonts/DroidSansMono.ttf', font_size=12,
+            font_name='data/fonts/DroidSansMono.ttf', font_size='12sp',
             text=example_text)
 
         b.add_widget(self.codeinput)
@@ -132,12 +133,10 @@ class CodeInputTest(App):
         return b
 
     def _update_size(self, instance, size):
-        self.codeinput.font_size = float(size)
+        self.codeinput.font_size = sp(float(size))
 
     def _update_font(self, instance, fnt_name):
-        font_name = fonts.match_font(fnt_name)
-        if os.path.exists(font_name):
-            instance.font_name = self.codeinput.font_name = font_name
+        instance.font_name = self.codeinput.font_name = fnt_name
 
     def _file_menu_selected(self, instance, value):
         if value == 'File':
