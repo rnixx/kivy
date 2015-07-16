@@ -107,6 +107,10 @@ cdef class _WindowSDL2Storage:
             self.die()
         SDL_JoystickOpen(0)
 
+        cdef void *userdata
+        userdata = <void *>self
+        SDL_SetEventFilter(handleLifecycleEvents, userdata)
+
         SDL_EventState(SDL_DROPFILE, SDL_ENABLE)
         cdef int w, h
         SDL_GetWindowSize(self.win, &w, &h)
@@ -328,6 +332,55 @@ cdef class _WindowSDL2Storage:
             cdef int w, h
             SDL_GetWindowSize(self.win, &w, &h)
             return [w, h]
+
+    def delegate_lifecycle_event(self, event_type):
+        print '################## dispatch_lifecycle_event'
+
+
+# Based on the example at
+# https://hg.libsdl.org/SDL/file/704a0bfecf75/README-ios.txt#l58
+cdef int handleLifecycleEvents(void *userdata, SDL_Event *event):
+    if event.type == SDL_APP_TERMINATING:
+        # Terminate the app.
+        # Shut everything down before returning from this function.
+        print 'SDL_APP_TERMINATING'
+        return 0
+    if event.type == SDL_APP_LOWMEMORY:
+        # You will get this when your app is paused and iOS wants more memory.
+        # Release as much memory as possible.
+        print 'SDL_APP_LOWMEMORY'
+        return 0
+    if event.type == SDL_APP_WILLENTERBACKGROUND:
+        # Prepare your app to go into the background.  Stop loops, etc.
+        # This gets called when the user hits the home button, or gets a call.
+        print 'SDL_APP_WILLENTERBACKGROUND'
+        return 0
+    if event.type == SDL_APP_DIDENTERBACKGROUND:
+        # This will get called if the user accepted whatever sent your app to
+        # the background. If the user got a phone call and canceled it, you'll
+        # instead get an SDL_APP_DIDENTERFOREGROUND event and restart your
+        # loops. When you get this, you have 5 seconds to save all your state
+        # or the app will be terminated. Your app is NOT active at this point.
+        print 'SDL_APP_DIDENTERBACKGROUND'
+        return 0
+    if event.type == SDL_APP_WILLENTERFOREGROUND:
+        # This call happens when your app is coming back to the foreground.
+        # Restore all your state here.
+        print 'SDL_APP_WILLENTERFOREGROUND'
+        return 0
+    if event.type == SDL_APP_DIDENTERFOREGROUND:
+        # Restart your loops here.
+        # Your app is interactive and getting CPU again.
+        print 'SDL_APP_DIDENTERFOREGROUND'
+        return 0
+    # TMP
+    if event.type == SDL_QUIT:
+        win = <_WindowSDL2Storage><void*> &userdata
+        # trying to use win causes memory access violation !
+        win.delegate_lifecycle_event(event.type)
+    # /TMP
+    # No special processing, add it to the event queue
+    return 1
 
 
 # Based on the example at
