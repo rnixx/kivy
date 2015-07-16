@@ -4,6 +4,7 @@ include "../../../kivy/graphics/config.pxi"
 from libc.string cimport memcpy
 from os import environ
 from kivy.config import Config
+from kivy.core.window import WindowBase
 
 cdef class _WindowSDL2Storage:
     cdef SDL_Window *win
@@ -12,11 +13,14 @@ cdef class _WindowSDL2Storage:
     cdef SDL_Surface *icon
     cdef int win_flags
 
-    def __cinit__(self):
+    cdef object delegate
+
+    def __cinit__(self, delegate):
         self.win = NULL
         self.ctx = NULL
         self.surface = NULL
         self.win_flags = 0
+        self.delegate = delegate
 
     def die(self):
         raise RuntimeError(<bytes> SDL_GetError())
@@ -108,7 +112,7 @@ cdef class _WindowSDL2Storage:
         SDL_JoystickOpen(0)
 
         cdef void *userdata
-        userdata = <void *>self
+        userdata = <void *>self.delegate
         SDL_SetEventFilter(handleLifecycleEvents, userdata)
 
         SDL_EventState(SDL_DROPFILE, SDL_ENABLE)
@@ -333,8 +337,9 @@ cdef class _WindowSDL2Storage:
             SDL_GetWindowSize(self.win, &w, &h)
             return [w, h]
 
-    def delegate_lifecycle_event(self, event_type):
+    def delegate_lifecycle_event(self, event):
         print '################## dispatch_lifecycle_event'
+        print self.delegate
 
 
 # Based on the example at
@@ -375,14 +380,15 @@ cdef int handleLifecycleEvents(void *userdata, SDL_Event *event):
         return 0
     # TMP
     if event.type == SDL_QUIT:
-        win = <_WindowSDL2Storage?><void*> &userdata
-        # trying to access ``win`` causes memory access violation !
-        #win.delegate_lifecycle_event(event.type)
+        win = <object><void*>&userdata
+        # thats's the goal!
+        win.delegate_lifecycle_event(<object><void*>event)
         print '########### QUIT ##############'
     # /TMP
     # No special processing, add it to the event queue
     return 1
 
+import threading
 
 # Based on the example at
 # http://content.gpwiki.org/index.php/OpenGL:Tutorials:Taking_a_Screenshot
