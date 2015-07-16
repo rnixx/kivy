@@ -375,9 +375,10 @@ cdef int handleLifecycleEvents(void *userdata, SDL_Event *event):
         return 0
     # TMP
     if event.type == SDL_QUIT:
-        win = <_WindowSDL2Storage><void*> &userdata
-        # trying to use win causes memory access violation !
-        win.delegate_lifecycle_event(event.type)
+        win = <_WindowSDL2Storage?><void*> &userdata
+        # trying to access ``win`` causes memory access violation !
+        #win.delegate_lifecycle_event(event.type)
+        print '########### QUIT ##############'
     # /TMP
     # No special processing, add it to the event queue
     return 1
