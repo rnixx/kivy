@@ -629,7 +629,6 @@ def determine_gl_flags():
         flags['library_dirs'] = [join(ndkplatform, 'usr', 'lib')]
         flags['libraries'] = ['GLESv2']
     elif platform == 'rpi':
-
         if not cross_sysroot:
             flags['include_dirs'] = [
                 '/opt/vc/include',
