@@ -30,7 +30,7 @@ To create a multiline :class:`TextInput` (the 'enter' key adds a new line)::
 
 To create a singleline :class:`TextInput`, set the :class:`TextInput.multiline`
 property to False (the 'enter' key will defocus the TextInput and emit an
-'on_text_validate' event)::
+:meth:`TextInput.on_text_validate` event)::
 
     def on_enter(instance, value):
         print('User pressed enter in', instance)
@@ -128,7 +128,7 @@ Shift + <dir>   Start a text selection. Dir can be Up, Down, Left or
                 Right
 Control + c     Copy selection
 Control + x     Cut selection
-Control + p     Paste selection
+Control + v     Paste clipboard content
 Control + a     Select all the content
 Control + z     undo
 Control + r     redo
@@ -158,7 +158,7 @@ from kivy.metrics import inch
 from kivy.utils import boundary, platform
 from kivy.uix.behaviors import FocusBehavior
 
-from kivy.core.text import Label
+from kivy.core.text import Label, DEFAULT_FONT
 from kivy.graphics import Color, Rectangle, PushMatrix, PopMatrix, Callback
 from kivy.graphics.context_instructions import Transform
 from kivy.graphics.texture import Texture
@@ -169,7 +169,7 @@ from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.image import Image
 
 from kivy.properties import StringProperty, NumericProperty, \
-    BooleanProperty, AliasProperty, \
+    BooleanProperty, AliasProperty, OptionProperty, \
     ListProperty, ObjectProperty, VariableListProperty
 
 Cache_register = Cache.register
@@ -227,7 +227,6 @@ class Selector(ButtonBehavior, Image):
 
     def __init__(self, **kwargs):
         super(Selector, self).__init__(**kwargs)
-        self.window.bind(on_touch_down=self.on_window_touch_down)
         self.matrix = self.target.get_window_matrix()
 
         with self.canvas.before:
@@ -250,8 +249,8 @@ class Selector(ButtonBehavior, Image):
         touch.apply_transform_2d(
             lambda x, y: matrix.transform_point(x, y, 0)[:2])
 
-    def on_window_touch_down(self, win, touch):
-        if self.parent is not win:
+    def on_touch_down(self, touch):
+        if self.parent is not EventLoop.window:
             return
 
         try:
@@ -280,10 +279,12 @@ class TextInputCutCopyPaste(Bubble):
 
     matrix = ObjectProperty(None)
 
+    _check_parent_ev = None
+
     def __init__(self, **kwargs):
         self.mode = 'normal'
         super(TextInputCutCopyPaste, self).__init__(**kwargs)
-        Clock.schedule_interval(self._check_parent, .5)
+        self._check_parent_ev = Clock.schedule_interval(self._check_parent, .5)
         self.matrix = self.textinput.get_window_matrix()
 
         with self.canvas.before:
@@ -316,6 +317,18 @@ class TextInputCutCopyPaste(Bubble):
         finally:
             touch.pop()
 
+    def on_touch_up(self, touch):
+        try:
+            touch.push()
+            self.transform_touch(touch)
+            for child in self.content.children:
+                if ref(child) in touch.grab_list:
+                    touch.grab_current = child
+                    break
+            return super(TextInputCutCopyPaste, self).on_touch_up(touch)
+        finally:
+            touch.pop()
+
     def on_textinput(self, instance, value):
         global Clipboard
         if value and not Clipboard and not _is_desktop:
@@ -330,7 +343,7 @@ class TextInputCutCopyPaste(Bubble):
                 break
             parent = parent.parent
         if parent is None:
-            Clock.unschedule(self._check_parent)
+            self._check_parent_ev.cancel()
             if self.textinput:
                 self.textinput._hide_cut_copy_paste()
 
@@ -424,6 +437,9 @@ class TextInput(FocusBehavior, Widget):
         (use Clock.schedule) the call to the functions for selecting
         text (select_all, select_text).
 
+    .. versionchanged:: 1.10.0
+        `background_disabled_active` has been removed.
+
     .. versionchanged:: 1.9.0
 
         :class:`TextInput` now inherits from
@@ -443,7 +459,11 @@ class TextInput(FocusBehavior, Widget):
     __events__ = ('on_text_validate', 'on_double_tap', 'on_triple_tap',
                   'on_quad_touch')
 
+    _resolved_base_dir = None
+
     def __init__(self, **kwargs):
+        self._update_graphics_ev = Clock.create_trigger(
+            self._update_graphics, -1)
         self.is_focusable = kwargs.get('is_focusable', True)
         self._cursor = [0, 0]
         self._selection = False
@@ -474,6 +494,11 @@ class TextInput(FocusBehavior, Widget):
         self._ctrl_r = False
         self._alt_l = False
         self._alt_r = False
+        self._refresh_text_from_property_ev = None
+        self._long_touch_ev = None
+        self._do_blink_cursor_ev = Clock.create_trigger(
+            self._do_blink_cursor, .5, interval=True)
+        self._refresh_line_options_ev = None
         self.interesting_keys = {
             8: 'backspace',
             13: 'enter',
@@ -499,15 +524,20 @@ class TextInput(FocusBehavior, Widget):
         fbind = self.fbind
         refresh_line_options = self._trigger_refresh_line_options
         update_text_options = self._update_text_options
+        trigger_update_graphics = self._trigger_update_graphics
 
         fbind('font_size', refresh_line_options)
         fbind('font_name', refresh_line_options)
+        fbind('font_context', refresh_line_options)
+        fbind('font_family', refresh_line_options)
+        fbind('base_direction', refresh_line_options)
+        fbind('text_language', refresh_line_options)
 
         def handle_readonly(instance, value):
             if value and (not _is_desktop or not self.allow_copy):
                 self.is_focusable = False
             if (not (value or self.disabled) or _is_desktop and
-                self._keyboard_mode == 'system'):
+                    self._keyboard_mode == 'system'):
                 self._editable = True
             else:
                 self._editable = False
@@ -520,7 +550,8 @@ class TextInput(FocusBehavior, Widget):
         fbind('password', update_text_options)
         fbind('password_mask', update_text_options)
 
-        fbind('pos', self._trigger_update_graphics)
+        fbind('pos', trigger_update_graphics)
+        fbind('halign', trigger_update_graphics)
         fbind('readonly', handle_readonly)
         fbind('focus', self._on_textinput_focused)
         handle_readonly(self, self.readonly)
@@ -648,7 +679,7 @@ class TextInput(FocusBehavior, Widget):
         '''Insert new text at the current cursor position. Override this
         function in order to pre-process text for input validation.
         '''
-        if self.readonly or not substring:
+        if self.readonly or not substring or not self._lines:
             return
 
         if isinstance(substring, bytes):
@@ -657,32 +688,17 @@ class TextInput(FocusBehavior, Widget):
         if self.replace_crlf:
             substring = substring.replace(u'\r\n', u'\n')
 
-        mode = self.input_filter
-        if mode is not None:
-            chr = type(substring)
-            if chr is bytes:
-                int_pat = self._insert_int_patb
-            else:
-                int_pat = self._insert_int_patu
-
-            if mode == 'int':
-                substring = re.sub(int_pat, chr(''), substring)
-            elif mode == 'float':
-                if '.' in self.text:
-                    substring = re.sub(int_pat, chr(''), substring)
-                else:
-                    substring = '.'.join([re.sub(int_pat, chr(''), k) for k
-                                          in substring.split(chr('.'), 1)])
-            else:
-                substring = mode(substring, from_undo)
-            if not substring:
-                return
-
         self._hide_handles(EventLoop.window)
 
         if not from_undo and self.multiline and self.auto_indent \
                 and substring == u'\n':
             substring = self._auto_indent(substring)
+
+        mode = self.input_filter
+        if mode not in (None, 'int', 'float'):
+            substring = mode(substring, from_undo)
+            if not substring:
+                return
 
         cc, cr = self.cursor
         sci = self.cursor_index
@@ -690,12 +706,20 @@ class TextInput(FocusBehavior, Widget):
         text = self._lines[cr]
         len_str = len(substring)
         new_text = text[:cc] + substring + text[cc:]
+        if mode is not None:
+            if mode == 'int':
+                if not re.match(self._insert_int_pat, new_text):
+                    return
+            elif mode == 'float':
+                if not re.match(self._insert_float_pat, new_text):
+                    return
         self._set_line_text(cr, new_text)
 
         wrap = (self._get_text_width(
             new_text,
             self.tab_width,
-            self._label_cached) > self.width)
+            self._label_cached) > (self.width - self.padding[0] -
+                                   self.padding[2]))
         if len_str > 1 or substring == u'\n' or wrap:
             # Avoid refreshing text on every keystroke.
             # Allows for faster typing of text when the amount of text in
@@ -848,7 +872,7 @@ class TextInput(FocusBehavior, Widget):
             self._delete_line(cr)
             start = cr - 1
         else:
-            #ch = text[cc-1]
+            # ch = text[cc-1]
             substring = text[cc - 1]
             new_text = text[:cc - 1] + text[cc:]
             self._set_line_text(cr, new_text)
@@ -875,7 +899,7 @@ class TextInput(FocusBehavior, Widget):
         self._undo.append({
             'undo_command': ('bkspc', new_index, substring),
             'redo_command': ol_index})
-        #reset redo when undo is appended to
+        # reset redo when undo is appended to
         self._redo = []
 
     _re_whitespace = re.compile(r'\s+')
@@ -1080,6 +1104,8 @@ class TextInput(FocusBehavior, Widget):
         .. versionchanged:: 1.9.1
 
         '''
+        if not self._lines:
+            return
         pgmove_speed = int(self.height /
             (self.line_height + self.line_spacing) - 1)
         col, row = self.cursor
@@ -1103,6 +1129,43 @@ class TextInput(FocusBehavior, Widget):
             else:
                 row = min(row + 1, len(self._lines) - 1)
                 col = min(len(self._lines[row]), col)
+        elif action == 'cursor_home':
+            col = 0
+            if control:
+                row = 0
+        elif action == 'cursor_end':
+            if control:
+                row = len(self._lines) - 1
+            col = len(self._lines[row])
+        elif action == 'cursor_pgup':
+            row = max(0, row - pgmove_speed)
+            col = min(len(self._lines[row]), col)
+        elif action == 'cursor_pgdown':
+            row = min(row + pgmove_speed, len(self._lines) - 1)
+            col = min(len(self._lines[row]), col)
+        elif (self._selection and self._selection_finished and
+                self._selection_from < self._selection_to and
+                action == 'cursor_left'):
+            current_selection_to = self._selection_to
+            while self._selection_from != current_selection_to:
+                current_selection_to -= 1
+                if col:
+                    col -= 1
+                else:
+                    row -= 1
+                    col = len(self._lines[row])
+        elif (self._selection and self._selection_finished and
+                self._selection_from > self._selection_to and
+                action == 'cursor_right'):
+            current_selection_to = self._selection_to
+            while self._selection_from != current_selection_to:
+                current_selection_to += 1
+                if len(self._lines[row]) > col:
+                    col += 1
+                else:
+                    row += 1
+                    col = 0
+
         elif action == 'cursor_left':
             if not self.password and control:
                 col, row = self._move_cursor_word_left()
@@ -1123,20 +1186,6 @@ class TextInput(FocusBehavior, Widget):
                         row += 1
                 else:
                     col, row = col + 1, row
-        elif action == 'cursor_home':
-            col = 0
-            if control:
-                row = 0
-        elif action == 'cursor_end':
-            if control:
-                row = len(self._lines) - 1
-            col = len(self._lines[row])
-        elif action == 'cursor_pgup':
-            row = max(0, row - pgmove_speed)
-            col = min(len(self._lines[row]), col)
-        elif action == 'cursor_pgdown':
-            row = min(row + pgmove_speed, len(self._lines) - 1)
-            col = min(len(self._lines[row]), col)
         self.cursor = (col, row)
 
     def get_cursor_from_xy(self, x, y):
@@ -1155,9 +1204,20 @@ class TextInput(FocusBehavior, Widget):
         _get_text_width = self._get_text_width
         _tab_width = self.tab_width
         _label_cached = self._label_cached
+        # Offset for horizontal text alignment
+        xoff = 0
+        halign = self.halign
+        base_dir = self.base_direction or self._resolved_base_dir
+        auto_halign_r = halign == 'auto' and base_dir and 'rtl' in base_dir
+        if halign == 'center':
+            viewport_width = self.width - padding_left - self.padding[2]  # _r
+            xoff = int((viewport_width - self._get_row_width(cy)) / 2)
+        elif halign == 'right' or auto_halign_r:
+            viewport_width = self.width - padding_left - self.padding[2]  # _r
+            xoff = viewport_width - self._get_row_width(cy)
         for i in range(0, len(l[cy])):
-            if _get_text_width(l[cy][:i], _tab_width, _label_cached) + \
-                  _get_text_width(l[cy][i], _tab_width, _label_cached) * 0.6 + \
+            if xoff + _get_text_width(l[cy][:i], _tab_width, _label_cached) + \
+                  _get_text_width(l[cy][i], _tab_width, _label_cached) * 0.6 +\
                   padding_left > cx + scrl_x:
                 cx = i
                 break
@@ -1173,6 +1233,7 @@ class TextInput(FocusBehavior, Widget):
         self._selection = False
         self._selection_finished = True
         self._selection_touch = None
+        self.selection_text = u''
         self._trigger_update_graphics()
 
     def delete_selection(self, from_undo=False):
@@ -1204,7 +1265,7 @@ class TextInput(FocusBehavior, Widget):
                                              lineflags, len_lines)
         self.scroll_x = scrl_x
         self.scroll_y = scrl_y
-        # handle undo and redo for delete selecttion
+        # handle undo and redo for delete selection
         self._set_unredo_delsel(a, b, v[a:b], from_undo)
         self.cancel_selection()
 
@@ -1241,14 +1302,15 @@ class TextInput(FocusBehavior, Widget):
             # allows smoother scrolling, noticeably
             # faster when dealing with large text.
             self._update_graphics_selection()
-            #self._trigger_update_graphics()
+            # self._trigger_update_graphics()
 
     #
     # Touch control
     #
     def long_touch(self, dt):
+        self._long_touch_ev = None
         if self._selection_to == self._selection_from:
-            pos = self.to_local(*self._long_touch_pos, relative=True)
+            pos = self.to_local(*self._long_touch_pos, relative=False)
             self._show_cut_copy_paste(
                 pos, EventLoop.window, mode='paste')
 
@@ -1306,22 +1368,22 @@ class TextInput(FocusBehavior, Widget):
             if scroll_type == 'down':
                 if self.multiline:
                     if self.scroll_y <= 0:
-                        return
+                        return True
                     self.scroll_y -= self.line_height
                 else:
                     if self.scroll_x <= 0:
-                        return
+                        return True
                     self.scroll_x -= self.line_height
             if scroll_type == 'up':
                 if self.multiline:
                     if (self._lines_rects[-1].pos[1] > self.y +
-                        self.line_height):
-                        return
+                            self.line_height):
+                        return True
                     self.scroll_y += self.line_height
                 else:
                     if (self.scroll_x + self.width >=
-                        self._lines_rects[-1].texture.size[0]):
-                        return
+                            self._lines_rects[-1].texture.size[0]):
+                        return True
                     self.scroll_x += self.line_height
 
         touch.grab(self)
@@ -1336,7 +1398,7 @@ class TextInput(FocusBehavior, Widget):
         self._hide_cut_copy_paste(EventLoop.window)
         # schedule long touch for paste
         self._long_touch_pos = touch.pos
-        Clock.schedule_once(self.long_touch, .5)
+        self._long_touch_ev = Clock.schedule_once(self.long_touch, .5)
 
         self.cursor = self.get_cursor_from_xy(*touch_pos)
         if not self._selection_touch:
@@ -1345,11 +1407,12 @@ class TextInput(FocusBehavior, Widget):
             self._selection_from = self._selection_to = self.cursor_index()
             self._update_selection()
 
-        if CutBuffer and 'button' in touch.profile and touch.button == 'middle':
+        if CutBuffer and 'button' in touch.profile and \
+                touch.button == 'middle':
             self.insert_text(CutBuffer.get_cutbuffer())
             return True
 
-        return False
+        return True
 
     def on_touch_move(self, touch):
         if touch.grab_current is not self:
@@ -1372,7 +1435,9 @@ class TextInput(FocusBehavior, Widget):
         self._touch_count -= 1
 
         # schedule long touch for paste
-        Clock.unschedule(self.long_touch)
+        if self._long_touch_ev is not None:
+            self._long_touch_ev.cancel()
+            self._long_touch_ev = None
 
         if not self.focus:
             return False
@@ -1602,7 +1667,7 @@ class TextInput(FocusBehavior, Widget):
             else:
                 bubble.arrow_pos = 'bottom_mid'
 
-        bubble_pos = self.to_widget(*bubble_pos)
+        bubble_pos = self.to_widget(*bubble_pos, relative=True)
         bubble.center_x = bubble_pos[0]
         if bubble.arrow_pos[0] == 't':
             bubble.top = bubble_pos[1]
@@ -1632,7 +1697,6 @@ class TextInput(FocusBehavior, Widget):
             _textinput_list.remove(wr)
 
     def _on_textinput_focused(self, instance, value, *largs):
-        self.focus = value
 
         win = EventLoop.window
         self.cancel_selection()
@@ -1640,13 +1704,13 @@ class TextInput(FocusBehavior, Widget):
 
         if value:
             if (not (self.readonly or self.disabled) or _is_desktop and
-                self._keyboard_mode == 'system'):
+                    self._keyboard_mode == 'system'):
                 self._trigger_cursor_reset()
                 self._editable = True
             else:
                 self._editable = False
         else:
-            Clock.unschedule(self._do_blink_cursor)
+            self._do_blink_cursor_ev.cancel()
             self._hide_handles(win)
 
     def _ensure_clipboard(self):
@@ -1720,14 +1784,27 @@ class TextInput(FocusBehavior, Widget):
         Cache_append('textinput.width', cid, width)
         return width
 
+    def on_cursor_blink(self, instance, value):
+        # trigger blink event reset to switch blinking while focused
+        self._reset_cursor_blink()
+
     def _do_blink_cursor(self, dt):
+        if not self.cursor_blink:
+            # ignore event if not triggered,
+            # stop if cursor_blink value changed right now
+            if self._do_blink_cursor_ev.is_triggered:
+                self._do_blink_cursor_ev.cancel()
+            # don't blink, make cursor visible
+            self._cursor_blink = False
+            return
+
         # Callback for blinking the cursor.
-        self.cursor_blink = not self.cursor_blink
+        self._cursor_blink = not self._cursor_blink
 
     def _reset_cursor_blink(self, *args):
-        Clock.unschedule(self._do_blink_cursor)
-        self.cursor_blink = 0
-        Clock.schedule_interval(self._do_blink_cursor, .5)
+        self._do_blink_cursor_ev.cancel()
+        self._cursor_blink = False
+        self._do_blink_cursor_ev()
 
     def on_cursor(self, instance, value):
         # When the cursor is moved, reset cursor blinking to keep it showing,
@@ -1750,8 +1827,12 @@ class TextInput(FocusBehavior, Widget):
         self._lines[line_num] = text
 
     def _trigger_refresh_line_options(self, *largs):
-        Clock.unschedule(self._refresh_line_options)
-        Clock.schedule_once(self._refresh_line_options, 0)
+        if self._refresh_line_options_ev is not None:
+            self._refresh_line_options_ev.cancel()
+        else:
+            self._refresh_line_options_ev = Clock.create_trigger(
+                self._refresh_line_options, 0)
+        self._refresh_line_options_ev()
 
     def _refresh_line_options(self, *largs):
         self._line_options = None
@@ -1763,9 +1844,10 @@ class TextInput(FocusBehavior, Widget):
     def _trigger_refresh_text(self, *largs):
         if len(largs) and largs[0] == self:
             largs = ()
-        Clock.unschedule(lambda dt: self._refresh_text_from_property(*largs))
-        Clock.schedule_once(lambda dt:
-                            self._refresh_text_from_property(*largs))
+        if self._refresh_text_from_property_ev is not None:
+            self._refresh_text_from_property_ev.cancel()
+        self._refresh_text_from_property_ev = Clock.schedule_once(
+            lambda dt: self._refresh_text_from_property(*largs))
 
     def _update_text_options(self, *largs):
         Cache_remove('textinput.width')
@@ -1783,7 +1865,7 @@ class TextInput(FocusBehavior, Widget):
         mode = 'all'
         if len(largs) > 1:
             mode, start, finish, _lines, _lines_flags, len_lines = largs
-            #start = max(0, start)
+            # start = max(0, start)
             cursor = None
         else:
             cursor = self.cursor_index()
@@ -1818,7 +1900,7 @@ class TextInput(FocusBehavior, Widget):
         min_line_ht = self._label_cached.get_extents('_')[1]
         # with markup texture can be of height `1`
         self.line_height = max(_lines_labels[0].height, min_line_ht)
-        #self.line_spacing = 2
+        # self.line_spacing = 2
         # now, if the text change, maybe the cursor is not at the same place as
         # before. so, try to set the cursor on the good place
         row = self.cursor_row
@@ -1868,8 +1950,8 @@ class TextInput(FocusBehavior, Widget):
             self._lines = _lins
 
     def _trigger_update_graphics(self, *largs):
-        Clock.unschedule(self._update_graphics)
-        Clock.schedule_once(self._update_graphics, -1)
+        self._update_graphics_ev.cancel()
+        self._update_graphics_ev()
 
     def _update_graphics(self, *largs):
         # Update all the graphics according to the current internal values.
@@ -1907,6 +1989,11 @@ class TextInput(FocusBehavior, Widget):
         y = self.top - padding_top + sy
         miny = self.y + padding_bottom
         maxy = self.top - padding_top
+        halign = self.halign
+        base_dir = self.base_direction
+        find_base_dir = Label.find_base_direction
+        auto_halign_r = halign == 'auto' and base_dir and 'rtl' in base_dir
+
         for line_num, value in enumerate(lines):
             if miny <= y <= maxy + dy:
                 texture = labels[line_num]
@@ -1960,9 +2047,20 @@ class TextInput(FocusBehavior, Widget):
                     tcx,
                     tcy)
 
+                # Horizontal alignment
+                xoffset = 0
+                if not base_dir:
+                    base_dir = self._resolved_base_dir = find_base_dir(value)
+                    if base_dir and halign == 'auto':
+                        auto_halign_r = 'rtl' in base_dir
+                if halign == 'center':
+                    xoffset = int((vw - size[0]) / 2.)
+                elif halign == 'right' or auto_halign_r:
+                    xoffset = max(0, int(vw - size[0]))
+
                 # add rectangle.
                 r = rects[line_num]
-                r.pos = int(x), int(y - mlh)
+                r.pos = int(xoffset + x), int(y - mlh)
                 r.size = size
                 r.texture = texture
                 r.tex_coords = texc
@@ -2053,16 +2151,41 @@ class TextInput(FocusBehavior, Widget):
         self._refresh_hint_text()
         self.scroll_x = self.scroll_y = 0
 
+    def _get_row_width(self, row):
+        # Get the pixel width of the given row.
+        _labels = self._lines_labels
+        if row < len(_labels):
+            return _labels[row].width
+        return 0
+
     def _get_cursor_pos(self):
         # return the current cursor x/y from the row/col
         dy = self.line_height + self.line_spacing
         padding_left = self.padding[0]
         padding_top = self.padding[1]
+        padding_right = self.padding[2]
         left = self.x + padding_left
         top = self.top - padding_top
         y = top + self.scroll_y
         y -= self.cursor_row * dy
-        x, y = left + self.cursor_offset() - self.scroll_x, y
+
+        # Horizontal alignment
+        halign = self.halign
+        viewport_width = self.width - padding_left - padding_right
+        cursor_offset = self.cursor_offset()
+        base_dir = self.base_direction or self._resolved_base_dir
+        auto_halign_r = halign == 'auto' and base_dir and 'rtl' in base_dir
+        if halign == 'center':
+            row_width = self._get_row_width(self.cursor_row)
+            x = left + int((viewport_width - row_width) / 2) \
+                     + cursor_offset - self.scroll_x
+        elif halign == 'right' or auto_halign_r:
+            row_width = self._get_row_width(self.cursor_row)
+            x = left + viewport_width - row_width \
+                     + cursor_offset - self.scroll_x
+        else:
+            x = left + cursor_offset - self.scroll_x
+
         if x < left:
             self.scroll_x = 0
             x = left
@@ -2077,6 +2200,10 @@ class TextInput(FocusBehavior, Widget):
             self._line_options = kw = {
                 'font_size': self.font_size,
                 'font_name': self.font_name,
+                'font_context': self.font_context,
+                'font_family': self.font_family,
+                'text_language': self.text_language,
+                'base_direction': self.base_direction,
                 'anchor_x': 'left',
                 'anchor_y': 'top',
                 'padding_x': 0,
@@ -2148,17 +2275,6 @@ class TextInput(FocusBehavior, Widget):
             oldindex = index + 1
         yield text[oldindex:]
 
-    def _split_word(self, text, width):
-        x = 0
-        split_pos = 0
-        for c in text:
-            cw = self._get_text_width(c, self.tab_width, self._label_cached)
-            if x + cw > width:
-                break
-            x += cw
-            split_pos += 1
-        return split_pos, x
-
     def _split_smart(self, text):
         # Do a "smart" split. If autowidth or autosize is set,
         # we are not doing smart split, just a split on line break.
@@ -2198,12 +2314,24 @@ class TextInput(FocusBehavior, Widget):
                 x = 0
             if is_newline:
                 flags |= FL_IS_LINEBREAK
-            elif width > 0 and w > width:
+            elif width >= 1 and w > width:
                 while w > width:
-                    split_pos, split_width = self._split_word(word, width)
+                    split_width = split_pos = 0
+                    # split the word
+                    for c in word:
+                        cw = self._get_text_width(
+                            c, self.tab_width, self._label_cached
+                        )
+                        if split_width + cw > width:
+                            break
+                        split_width += cw
+                        split_pos += 1
+                    if split_width == split_pos == 0:
+                        # can't fit the word in, give up
+                        break
                     lines_append(word[:split_pos])
-                    lines_flags_append(FL_IS_WORDBREAK)
-                    flags = 0
+                    lines_flags_append(flags)
+                    flags = FL_IS_WORDBREAK
                     word = word[split_pos:]
                     w -= split_width
                 x = w
@@ -2219,9 +2347,24 @@ class TextInput(FocusBehavior, Widget):
 
     def _key_down(self, key, repeat=False):
         displayed_str, internal_str, internal_action, scale = key
-        if internal_action is None:
-            if self._selection:
+
+        # handle deletion
+        if (self._selection and
+                internal_action in (None, 'del', 'backspace', 'enter')):
+            if internal_action != 'enter' or self.multiline:
                 self.delete_selection()
+        elif internal_action == 'del':
+            # Move cursor one char to the right. If that was successful,
+            # do a backspace (effectively deleting char right of cursor)
+            cursor = self.cursor
+            self.do_cursor_movement('cursor_right')
+            if cursor != self.cursor:
+                self.do_backspace(mode='del')
+        elif internal_action == 'backspace':
+            self.do_backspace()
+
+        # handle action keys and text insertion
+        if internal_action is None:
             self.insert_text(displayed_str)
         elif internal_action in ('shift', 'shift_L', 'shift_R'):
             if not self._selection:
@@ -2246,28 +2389,15 @@ class TextInput(FocusBehavior, Widget):
                 self._update_selection()
             else:
                 self.cancel_selection()
-        elif self._selection and internal_action in ('del', 'backspace'):
-            self.delete_selection()
-        elif internal_action == 'del':
-            # Move cursor one char to the right. If that was successful,
-            # do a backspace (effectively deleting char right of cursor)
-            cursor = self.cursor
-            self.do_cursor_movement('cursor_right')
-            if cursor != self.cursor:
-                self.do_backspace(mode='del')
-        elif internal_action == 'backspace':
-            self.do_backspace()
         elif internal_action == 'enter':
             if self.multiline:
                 self.insert_text(u'\n')
             else:
                 self.dispatch('on_text_validate')
-                self.focus = False
+                if self.text_validate_unfocus:
+                    self.focus = False
         elif internal_action == 'escape':
             self.focus = False
-        if internal_action != 'escape':
-            #self._recalc_size()
-            pass
 
     def _key_up(self, key, repeat=False):
         displayed_str, internal_str, internal_action, scale = key
@@ -2366,7 +2496,7 @@ class TextInput(FocusBehavior, Widget):
                     self._cut(self.selection_text)
                 elif key == ord('c'):  # copy selection
                     self.copy()
-                elif key == ord('v'):  # paste selection
+                elif key == ord('v'):  # paste clipboard content
                     self.paste()
                 elif key == ord('a'):  # select all
                     self.select_all()
@@ -2375,13 +2505,15 @@ class TextInput(FocusBehavior, Widget):
                 elif key == ord('r'):  # redo
                     self.do_redo()
             else:
-                if EventLoop.window.__class__.__module__ == \
-                    'kivy.core.window.window_sdl2':
+                is_sdl2 = (EventLoop.window.__class__.__module__ ==
+                           'kivy.core.window.window_sdl2')
+                if is_sdl2:
+                    # we expect to get managed key input via on_textinput
                     return
                 if self._selection:
                     self.delete_selection()
                 self.insert_text(text)
-            #self._recalc_size()
+            # self._recalc_size()
             return
 
         if is_interesting_key:
@@ -2412,7 +2544,7 @@ class TextInput(FocusBehavior, Widget):
             self.delete_selection()
         self.insert_text(text, False)
 
-    def on_hint_text(self, instance, value):
+    def on__hint_text(self, instance, value):
         self._refresh_hint_text()
 
     def _refresh_hint_text(self):
@@ -2440,8 +2572,9 @@ class TextInput(FocusBehavior, Widget):
     _lines = ListProperty([])
     _hint_text_lines = ListProperty([])
     _editable = BooleanProperty(True)
-    _insert_int_patu = re.compile(u'[^0-9]')
-    _insert_int_patb = re.compile(b'[^0-9]')
+    _insert_int_pat = re.compile(u'^-?[0-9]*$')
+    _insert_float_pat = re.compile(u'^-?[0-9]*\\.?[0-9]*$')
+    _cursor_blink = BooleanProperty(False)
 
     readonly = BooleanProperty(False)
     '''If True, the user will not be able to change the content of a textinput.
@@ -2450,6 +2583,18 @@ class TextInput(FocusBehavior, Widget):
 
     :attr:`readonly` is a :class:`~kivy.properties.BooleanProperty` and
     defaults to False.
+    '''
+
+    text_validate_unfocus = BooleanProperty(True)
+    '''If True, the :meth:`TextInput.on_text_validate` event will unfocus the
+    widget, therefore make it stop listening to the keyboard. When disabled,
+    the :meth:`TextInput.on_text_validate` event can be fired multiple times
+    as the result of TextInput keeping the focus enabled.
+
+    .. versionadded:: 1.10.1
+
+    :attr:`text_validate_unfocus` is
+    a :class:`~kivy.properties.BooleanProperty` and defaults to True.
     '''
 
     multiline = BooleanProperty(True)
@@ -2474,7 +2619,7 @@ class TextInput(FocusBehavior, Widget):
     password_mask = StringProperty('*')
     '''Sets the character used to mask the text when :attr:`password` is True.
 
-    .. versionadded:: 1.9.2
+    .. versionadded:: 1.10.0
 
     :attr:`password_mask` is a :class:`~kivy.properties.StringProperty` and
     defaults to `'*'`.
@@ -2484,19 +2629,24 @@ class TextInput(FocusBehavior, Widget):
     '''If True provides auto suggestions on top of keyboard.
     This will only work if :attr:`input_type` is set to `text`.
 
-     .. versionadded:: 1.8.0
+    .. versionadded:: 1.8.0
 
-     :attr:`keyboard_suggestions` is a
-     :class:`~kivy.properties.BooleanProperty` defaults to True.
+    :attr:`keyboard_suggestions` is a :class:`~kivy.properties.BooleanProperty`
+    and defaults to True.
     '''
 
-    cursor_blink = BooleanProperty(False)
-    '''This property is used to blink the cursor graphic. The value of
-    :attr:`cursor_blink` is automatically computed. Setting a value on it will
-    have no impact.
+    cursor_blink = BooleanProperty(True)
+    '''This property is used to set whether the graphic cursor should blink
+    or not.
+
+    .. versionchanged:: 1.10.1
+        `cursor_blink` has been refactored to enable switching the blinking
+        on/off and the previous behavior has been moved to a private
+        `_cursor_blink` property. The previous default value `False` has been
+        changed to `True`.
 
     :attr:`cursor_blink` is a :class:`~kivy.properties.BooleanProperty` and
-    defaults to False.
+    defaults to True.
     '''
 
     def _get_cursor(self):
@@ -2510,10 +2660,6 @@ class TextInput(FocusBehavior, Widget):
         cr = boundary(pos[1], 0, len(l) - 1)
         cc = boundary(pos[0], 0, len(l[cr]))
         cursor = cc, cr
-        if self._cursor == cursor:
-            return
-
-        self._cursor = cursor
 
         # adjust scrollview to ensure that the cursor will be always inside our
         # viewport.
@@ -2523,7 +2669,7 @@ class TextInput(FocusBehavior, Widget):
         sx = self.scroll_x
         offset = self.cursor_offset()
 
-        # if offset is outside the current bounds, reajust
+        # if offset is outside the current bounds, readjust
         if offset > viewport_width + sx:
             self.scroll_x = offset - viewport_width
         if offset < sx:
@@ -2543,6 +2689,10 @@ class TextInput(FocusBehavior, Widget):
             sy = offsety
         self.scroll_y = sy
 
+        if self._cursor == cursor:
+            return
+
+        self._cursor = cursor
         return True
 
     cursor = AliasProperty(_get_cursor, _set_cursor)
@@ -2590,6 +2740,15 @@ class TextInput(FocusBehavior, Widget):
 
     :attr:`cursor_color` is a :class:`~kivy.properties.ListProperty` and
     defaults to [1, 0, 0, 1].
+    '''
+
+    cursor_width = NumericProperty('1sp')
+    '''Current width of the cursor.
+
+    .. versionadded:: 1.10.0
+
+    :attr:`cursor_width` is a :class:`~kivy.properties.NumericProperty` and
+    defaults to '1sp'.
     '''
 
     line_height = NumericProperty(1)
@@ -2661,6 +2820,18 @@ class TextInput(FocusBehavior, Widget):
     defaults to [6, 6, 6, 6].
     '''
 
+    halign = OptionProperty('auto', options=['left', 'center', 'right',
+                            'auto'])
+    '''Horizontal alignment of the text.
+
+    :attr:`halign` is an :class:`~kivy.properties.OptionProperty` and
+    defaults to 'auto'. Available options are : auto, left, center and right.
+    Auto will attempt to autodetect horizontal alignment for RTL text (Pango
+    only), otherwise it behaves like `left`.
+
+    .. versionadded:: 1.10.1
+    '''
+
     scroll_x = NumericProperty(0)
     '''X scrolling value of the viewport. The scrolling is automatically
     updated when the cursor is moved or text changed. If there is no
@@ -2697,7 +2868,7 @@ class TextInput(FocusBehavior, Widget):
 
     .. versionadded:: 1.4.1
 
-    It must be a list of four values: (top, right, bottom, left). Read the
+    It must be a list of four values: (bottom, right, top, left). Read the
     BorderImage instruction for more information about how to use it.
 
     :attr:`border` is a :class:`~kivy.properties.ListProperty` and defaults
@@ -2734,17 +2905,6 @@ class TextInput(FocusBehavior, Widget):
     :attr:`background_active` is a
     :class:`~kivy.properties.StringProperty` and
     defaults to 'atlas://data/images/defaulttheme/textinput_active'.
-    '''
-
-    background_disabled_active = StringProperty(
-        'atlas://data/images/defaulttheme/textinput_disabled_active')
-    '''Background image of the TextInput when it's in focus and disabled.
-
-    .. versionadded:: 1.8.0
-
-    :attr:`background_disabled_active` is a
-    :class:`~kivy.properties.StringProperty` and
-    defaults to 'atlas://data/images/defaulttheme/textinput_disabled_active'.
     '''
 
     background_color = ListProperty([1, 1, 1, 1])
@@ -2810,11 +2970,15 @@ class TextInput(FocusBehavior, Widget):
         if not MarkupLabel:
             from kivy.core.text.markup import MarkupLabel
 
+        cursor_row = self.cursor_row
+        if cursor_row >= len(self._lines) or self.canvas is None:
+            return
+
         cursor_pos = self.cursor_pos
-        txt = self._lines[self.cursor_row]
-        cr = self.cursor_row
+        txt = self._lines[cursor_row]
+
         kw = self._get_line_options()
-        rct = self._lines_rects[cr]
+        rct = self._lines_rects[cursor_row]
 
         lbl = text = None
         if value:
@@ -2826,7 +2990,7 @@ class TextInput(FocusBehavior, Widget):
 
         lbl.refresh()
 
-        self._lines_labels[cr] = lbl.texture
+        self._lines_labels[cursor_row] = lbl.texture
         rct.size = lbl.size
         self._update_graphics()
 
@@ -2910,7 +3074,7 @@ class TextInput(FocusBehavior, Widget):
     :attr:`text` is an :class:`~kivy.properties.AliasProperty`.
     '''
 
-    font_name = StringProperty('Roboto')
+    font_name = StringProperty(DEFAULT_FONT)
     '''Filename of the font to use. The path can be absolute or relative.
     Relative paths are resolved by the :func:`~kivy.resources.resource_find`
     function.
@@ -2929,24 +3093,124 @@ class TextInput(FocusBehavior, Widget):
         .. |unicodechar| image:: images/unicode-char.png
 
     :attr:`font_name` is a :class:`~kivy.properties.StringProperty` and
-    defaults to 'Roboto'.
+    defaults to 'Roboto'. This value is taken
+    from :class:`~kivy.config.Config`.
     '''
 
     font_size = NumericProperty('15sp')
     '''Font size of the text in pixels.
 
     :attr:`font_size` is a :class:`~kivy.properties.NumericProperty` and
-    defaults to 10.
+    defaults to 15\ :attr:`~kivy.metrics.sp`.
     '''
 
-    hint_text = StringProperty('')
-    '''Hint text of the widget.
+    font_context = StringProperty(None, allownone=True)
+    '''Font context. `None` means the font is used in isolation, so you are
+    guaranteed to be drawing with the TTF file resolved by :attr:`font_name`.
+    Specifying a value here will load the font file into a named context,
+    enabling fallback between all fonts in the same context. If a font
+    context is set, you are not guaranteed that rendering will actually use
+    the specified TTF file for all glyphs (Pango will pick the one it
+    thinks is best).
 
-    Shown if text is '' and focus is False.
+    If Kivy is linked against a system-wide installation of FontConfig,
+    you can load the system fonts by specifying a font context starting
+    with the special string `system://`. This will load the system
+    fontconfig configuration, and add your application-specific fonts on
+    top of it (this imposes a signifficant risk of family name collision,
+    Pango may not use your custom font file, but pick one from the system)
+
+    .. note::
+        This feature requires the Pango text provider.
+
+    .. versionadded:: 1.10.1
+
+    :attr:`font_context` is a :class:`~kivy.properties.StringProperty` and
+    defaults to None.
+    '''
+
+    font_family = StringProperty(None, allownone=True)
+    '''Font family, this is only applicable when using :attr:`font_context`
+    option. The specified font family will be requested, but note that it may
+    not be available, or there could be multiple fonts registered with the
+    same family. The value can be a family name (string) available in the
+    font context (for example a system font in a `system://` context, or a
+    custom font file added using :class:`kivy.core.text.FontContextManager`).
+    If set to `None`, font selection is controlled by the :attr:`font_name`
+    setting.
+
+    .. note::
+        If using :attr:`font_name` to reference a custom font file, you
+        should leave this as `None`. The family name is managed automatically
+        in this case.
+
+    .. note::
+        This feature requires the Pango text provider.
+
+    .. versionadded:: 1.10.1
+
+    :attr:`font_family` is a :class:`~kivy.properties.StringProperty` and
+    defaults to None.
+    '''
+
+    base_direction = OptionProperty(None,
+                     options=['ltr', 'rtl', 'weak_rtl', 'weak_ltr', None],
+                     allownone=True)
+    '''Base direction of text, this impacts horizontal alignment when
+    :attr:`halign` is `auto` (the default). Available options are: None,
+    "ltr" (left to right), "rtl" (right to left) plus "weak_ltr" and
+    "weak_rtl".
+
+    .. note::
+        This feature requires the Pango text provider.
+
+    .. note::
+        Weak modes are currently not implemented in Kivy text layout, and
+        have the same effect as setting strong mode.
+
+    .. versionadded:: 1.10.1
+
+    :attr:`base_direction` is an :class:`~kivy.properties.OptionProperty` and
+    defaults to None (autodetect RTL if possible, otherwise LTR).
+    '''
+
+    text_language = StringProperty(None, allownone=True)
+    '''Language of the text, if None Pango will determine it from locale.
+    This is an RFC-3066 format language tag (as a string), for example
+    "en_US", "zh_CN", "fr" or "ja". This can impact font selection, metrics
+    and rendering. For example, the same bytes of text can look different
+    for `ur` and `ar` languages, though both use Arabic script.
+
+    .. note::
+        This feature requires the Pango text provider.
+
+    .. versionadded:: 1.10.1
+
+    :attr:`text_language` is a :class:`~kivy.properties.StringProperty` and
+    defaults to None.
+    '''
+
+    _hint_text = StringProperty('')
+
+    def _set_hint_text(self, value):
+        if isinstance(value, bytes):
+            value = value.decode('utf8')
+        self._hint_text = value
+
+    def _get_hint_text(self):
+        return self._hint_text
+
+    hint_text = AliasProperty(
+        _get_hint_text, _set_hint_text, bind=('_hint_text', ))
+    '''Hint text of the widget, shown if text is ''.
 
     .. versionadded:: 1.6.0
 
-    :attr:`hint_text` a :class:`~kivy.properties.StringProperty` and defaults
+    .. versionchanged:: 1.10.0
+        The property is now an AliasProperty and byte values are decoded to
+        strings. The hint text will stay visible when the widget is focused.
+
+    :attr:`hint_text` a :class:`~kivy.properties.AliasProperty` and defaults
     to ''.
     '''
 
@@ -2987,13 +3251,14 @@ class TextInput(FocusBehavior, Widget):
     '''
 
     def _get_min_height(self):
-        return (len(self._lines) * (self.line_height + self.line_spacing)
-                + self.padding[1] + self.padding[3])
+        return (len(self._lines) * (self.line_height + self.line_spacing) +
+                self.padding[1] + self.padding[3])
 
     minimum_height = AliasProperty(_get_min_height, None,
                                    bind=('_lines', 'line_spacing', 'padding',
                                          'font_size', 'font_name', 'password',
-                                         'hint_text', 'line_height'))
+                                         'font_context', 'hint_text',
+                                         'line_height'))
     '''Minimum height of the content inside the TextInput.
 
     .. versionadded:: 1.8.0
@@ -3029,7 +3294,7 @@ class TextInput(FocusBehavior, Widget):
     defaults to `None`. Can be one of `None`, `'int'` (string), or `'float'`
     (string), or a callable. If it is `'int'`, it will only accept numbers.
     If it is `'float'` it will also accept a single period. Finally, if it is
-    a callable it will be called with two parameter; the string to be added
+    a callable it will be called with two parameters; the string to be added
     and a bool indicating whether the string is a result of undo (True). The
     callable should return a new substring that will be used instead.
     '''
@@ -3109,7 +3374,7 @@ if __name__ == '__main__':
             root = BoxLayout(orientation='vertical')
             textinput = TextInput(multiline=True, use_bubble=True,
                                   use_handles=True)
-            #textinput.text = __doc__
+            # textinput.text = __doc__
             root.add_widget(textinput)
             textinput2 = TextInput(multiline=False, text='monoline textinput',
                                    size_hint=(1, None), height=30)

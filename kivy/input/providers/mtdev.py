@@ -39,6 +39,8 @@ To fix that, you can add these options to the argument line:
 __all__ = ('MTDMotionEventProvider', 'MTDMotionEvent')
 
 import os
+import os.path
+import time
 from kivy.input.motionevent import MotionEvent
 from kivy.input.shape import ShapeRect
 
@@ -70,6 +72,7 @@ class MTDMotionEvent(MotionEvent):
         i, sx, sy, d = (self.id, self.sx, self.sy, self.device)
         return '<MTDMotionEvent id=%d pos=(%f, %f) device=%s>' % (i, sx, sy, d)
 
+
 if 'KIVY_DOC' in os.environ:
 
     # documentation hack
@@ -95,7 +98,7 @@ else:
                    'min_position_y', 'max_position_y',
                    'min_pressure', 'max_pressure',
                    'min_touch_major', 'max_touch_major',
-                   'min_touch_minor', 'min_touch_major',
+                   'min_touch_minor', 'max_touch_minor',
                    'invert_x', 'invert_y',
                    'rotation')
 
@@ -110,7 +113,7 @@ else:
             if not args:
                 Logger.error('MTD: No filename pass to MTD configuration')
                 Logger.error('MTD: Use /dev/input/event0 for example')
-                return None
+                return
 
             # read filename
             self.input_fn = args[0]
@@ -159,6 +162,7 @@ else:
             self.uid = 0
             self.queue = collections.deque()
             self.thread = threading.Thread(
+                name=self.__class__.__name__,
                 target=self._thread_run,
                 kwargs=dict(
                     queue=self.queue,
@@ -193,8 +197,8 @@ else:
 
             def process(points):
                 for args in points:
-                    # this can happen if we have a touch going on already at the
-                    # start of the app
+                    # this can happen if we have a touch going on already at
+                    # the start of the app
                     if 'id' not in args:
                         continue
                     tid = args['id']
@@ -217,12 +221,24 @@ else:
                     queue.append((action, touch))
 
             def normalize(value, vmin, vmax):
-                return (value - vmin) / float(vmax - vmin)
+                try:
+                    return (value - vmin) / float(vmax - vmin)
+                except ZeroDivisionError:  # it's both in py2 and py3
+                    return (value - vmin)
 
             # open mtdev device
             _fn = input_fn
             _slot = 0
-            _device = Device(_fn)
+            try:
+                _device = Device(_fn)
+            except OSError as e:
+                if e.errno == 13:  # Permission denied
+                    Logger.warn(
+                        'MTD: Unable to open device "{0}". Please ensure you'
+                        ' have the appropriate permissions.'.format(_fn))
+                    return
+                else:
+                    raise
             _changes = set()
 
             # prepare some vars to get limit of some component
@@ -263,8 +279,20 @@ else:
             rotation = drs('rotation', 0)
             Logger.info('MTD: <%s> rotation set to %d' %
                         (_fn, rotation))
-
+            failures = 0
             while _device:
+                # if device have disconnected lets try to connect
+                if failures > 1000:
+                    Logger.info('MTD: <%s> input device disconnected' % _fn)
+                    while not os.path.exists(_fn):
+                        time.sleep(0.05)
+                    # input device is back online let's recreate device
+                    _device.close()
+                    _device = Device(_fn)
+                    Logger.info('MTD: <%s> input device reconnected' % _fn)
+                    failures = 0
+                    continue
+
                 # idle as much as we can.
                 while _device.idle(1000):
                     continue
@@ -273,7 +301,10 @@ else:
                 while True:
                     data = _device.get()
                     if data is None:
+                        failures += 1
                         break
+
+                    failures = 0
 
                     # set the working slot
                     if data.type == MTDEV_TYPE_EV_ABS and \
@@ -282,7 +313,7 @@ else:
                         continue
 
                     # fill the slot
-                    if not _slot in l_points:
+                    if not (_slot in l_points):
                         l_points[_slot] = dict()
                     point = l_points[_slot]
                     ev_value = data.value

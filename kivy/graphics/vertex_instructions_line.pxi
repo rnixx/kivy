@@ -59,7 +59,7 @@ cdef class Line(VertexInstruction):
         `dash_length`: int
             Length of a segment (if dashed), defaults to 1.
         `dash_offset`: int
-            Offset between the end of a segment and the begining of the
+            Offset between the end of a segment and the beginning of the
             next one, defaults to 0. Changing this makes it dashed.
         `width`: float
             Width of the line, defaults to 1.0.
@@ -332,7 +332,7 @@ cdef class Line(VertexInstruction):
         cdef double pcx, pcy, px1, py1, px2, py2, px3, py3, px4, py4, pangle, pangle2
         cdef double w = self._width
         cdef double ix, iy
-        cdef unsigned int piv, pii2, piv2
+        cdef unsigned int piv, pii2, piv2, skip = 0
         cdef double jangle
         angle = sangle = 0
         piv = pcx = pcy = cx = cy = ii = iv = ix = iy = 0
@@ -346,7 +346,11 @@ cdef class Line(VertexInstruction):
             bx = p[i * 2 + 2]
             _by = p[i * 2 + 3]
 
-            if i > 0 and self._joint != LINE_JOINT_NONE:
+            if (ax, ay) == (bx, _by):
+                skip += 1
+                continue
+
+            if i - skip > 0 and self._joint != LINE_JOINT_NONE:
                 pcx = cx
                 pcy = cy
                 px1 = x1
@@ -384,7 +388,7 @@ cdef class Line(VertexInstruction):
             x3 = bx + cos2
             y3 = _by + sin2
 
-            if i == 0:
+            if i - skip == 0:
                 sx1 = x1
                 sy1 = y1
                 sx4 = x4
@@ -421,7 +425,7 @@ cdef class Line(VertexInstruction):
             iv += 1
 
             # joint generation
-            if i == 0 or self._joint == LINE_JOINT_NONE:
+            if i - skip == 0 or self._joint == LINE_JOINT_NONE:
                 continue
 
             # calculate the angle of the previous and current segment
@@ -497,8 +501,6 @@ cdef class Line(VertexInstruction):
                     indices[ii + 5] = iv + 1
                     ii += 6
                     iv += 2
-
-
 
             elif self._joint == LINE_JOINT_ROUND:
 
@@ -643,6 +645,11 @@ cdef class Line(VertexInstruction):
             indices[ii + 1] = iv - 1
             indices[ii + 2] = piv + 2
             ii += 3
+
+        while ii < indices_count:
+            # make all the remaining indices point to the last vertice
+            indices[ii] = siv
+            ii += 1
 
         # compute bbox
         for i in xrange(vertices_count):
@@ -832,9 +839,9 @@ cdef class Line(VertexInstruction):
         * x and y represent the bottom left of the ellipse
         * width and height represent the size of the ellipse
         * (optional) angle_start and angle_end are in degree. The default
-            value is 0 and 360.
+          value is 0 and 360.
         * (optional) segments is the precision of the ellipse. The default
-            value is calculated from the range between angle.
+          value is calculated from the range between angle.
 
         Note that it's up to you to :attr:`close` the ellipse or not.
 
@@ -906,7 +913,7 @@ cdef class Line(VertexInstruction):
 
 
     property circle:
-        '''Use this property to build a circle, without calculate the
+        '''Use this property to build a circle, without calculating the
         :attr:`points`. You can only set this property, not get it.
 
         The argument must be a tuple of (center_x, center_y, radius, angle_start,
@@ -915,9 +922,9 @@ cdef class Line(VertexInstruction):
         * center_x and center_y represent the center of the circle
         * radius represent the radius of the circle
         * (optional) angle_start and angle_end are in degree. The default
-            value is 0 and 360.
+          value is 0 and 360.
         * (optional) segments is the precision of the ellipse. The default
-            value is calculated from the range between angle.
+          value is calculated from the range between angle.
 
         Note that it's up to you to :attr:`close` the circle or not.
 
@@ -989,8 +996,7 @@ cdef class Line(VertexInstruction):
         '''Use this property to build a rectangle, without calculating the
         :attr:`points`. You can only set this property, not get it.
 
-        The argument must be a tuple of (x, y, width, height)
-        angle_end, segments):
+        The argument must be a tuple of (x, y, width, height):
 
         * x and y represent the bottom-left position of the rectangle
         * width and height represent the size
@@ -1048,7 +1054,7 @@ cdef class Line(VertexInstruction):
         * x and y represent the bottom-left position of the rectangle
         * width and height represent the size
         * corner_radius is the number of pixels between two borders and the center of the circle arc joining them
-        * resolution is the numper of line segment that will be used to draw the circle arc at each corner (defaults to 30)
+        * resolution is the number of line segment that will be used to draw the circle arc at each corner (defaults to 30)
 
         The line is automatically closed.
 
@@ -1482,8 +1488,8 @@ cdef class SmoothLine(Line):
 
         self.batch.set_data(vertices, <int>vcount, indices, <int>icount)
 
-        #free(vertices)
-        #free(indices)
+        free(vertices)
+        free(indices)
 
 
     property overdraw_width:

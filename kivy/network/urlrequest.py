@@ -1,6 +1,6 @@
 '''
-Url Request
-===========
+UrlRequest
+==========
 
 .. versionadded:: 1.0.8
 
@@ -29,22 +29,20 @@ to the request will be accessible as the parameter called "result" on
 the callback function of the on_success event.
 
 
-Example of fetching weather in Paris::
+Example of fetching JSON::
 
-    def got_weather(req, results):
-        for key, value in results['weather'][0].items():
-            print(key, ': ', value)
+    def got_json(req, result):
+        for key, value in result['headers'].items():
+            print('{}: {}'.format(key, value))
 
-    req = UrlRequest(
-        'http://api.openweathermap.org/data/2.5/weather?q=Paris,fr',
-        got_weather)
+    req = UrlRequest('https://httpbin.org/headers', got_json)
 
 Example of Posting data (adapted from httplib example)::
 
     import urllib
 
     def bug_posted(req, result):
-        print('Our bug is posted !')
+        print('Our bug is posted!')
         print(result)
 
     params = urllib.urlencode({'@number': 12524, '@type': 'issue',
@@ -58,11 +56,13 @@ If you want a synchronous request, you can call the wait() method.
 
 '''
 
+from base64 import b64encode
 from collections import deque
 from threading import Thread
 from json import loads
 from time import sleep
 from kivy.compat import PY2
+from kivy.config import Config
 
 if PY2:
     from httplib import HTTPConnection
@@ -114,7 +114,7 @@ class UrlRequest(Thread):
         Parameter `ca_file` added.
         Parameter `verify` added.
 
-    .. versionchanged:: 1.9.2
+    .. versionchanged:: 1.10.0
 
         Parameters `proxy_host`, `proxy_port` and `proxy_headers` added.
 
@@ -178,7 +178,7 @@ class UrlRequest(Thread):
                  req_body=None, req_headers=None, chunk_size=8192,
                  timeout=None, method=None, decode=True, debug=False,
                  file_path=None, ca_file=None, verify=True, proxy_host=None,
-                 proxy_port=None, proxy_headers=None):
+                 proxy_port=None, proxy_headers=None, user_agent=None):
         super(UrlRequest, self).__init__()
         self._queue = deque()
         self._trigger_result = Clock.create_trigger(self._dispatch_result, 0)
@@ -224,7 +224,13 @@ class UrlRequest(Thread):
         q = self._queue.appendleft
         url = self.url
         req_body = self.req_body
-        req_headers = self.req_headers
+        req_headers = self.req_headers or {}
+        if (
+            Config.has_section('network')
+            and 'useragent' in Config.items('network')
+        ):
+            useragent = Config.get('network', 'useragent')
+            req_headers.setdefault('User-Agent', useragent)
 
         try:
             result, resp = self._fetch_url(url, req_body, req_headers, q)
@@ -247,6 +253,25 @@ class UrlRequest(Thread):
         if self in g_requests:
             g_requests.remove(self)
 
+    def _parse_url(self, url):
+        parse = urlparse(url)
+        host = parse.hostname
+        port = parse.port
+        userpass = None
+
+        # append user + pass to hostname if specified
+        if parse.username and parse.password:
+            userpass = {
+                "Authorization": "Basic {}".format(b64encode(
+                    "{}:{}".format(
+                        parse.username,
+                        parse.password
+                    ).encode('utf-8')
+                ).decode('utf-8'))
+            }
+
+        return host, port, userpass, parse
+
     def _fetch_url(self, url, body, headers, q):
         # Parse and fetch the current url
         trigger = self._trigger_result
@@ -266,17 +291,15 @@ class UrlRequest(Thread):
                 id(self), headers))
 
         # parse url
-        parse = urlparse(url)
+        host, port, userpass, parse = self._parse_url(url)
+        if userpass and not headers:
+            headers = userpass
+        elif userpass and headers:
+            key = list(userpass.keys())[0]
+            headers[key] = userpass[key]
 
         # translate scheme to connection class
         cls = self.get_connection_for_scheme(parse.scheme)
-
-        # correctly determine host/port
-        port = None
-        host = parse.netloc.split(':')
-        if len(host) > 1:
-            port = int(host[1])
-        host = host[0]
 
         # reconstruct path to pass on the request
         path = parse.path
@@ -363,7 +386,7 @@ class UrlRequest(Thread):
             else:
                 bytes_so_far, result = get_chunks()
 
-            # ensure that restults are dispatched for the last chunk,
+            # ensure that results are dispatched for the last chunk,
             # avoid trigger
             if report_progress:
                 q(('progress', resp, (bytes_so_far, total_size)))
@@ -406,6 +429,8 @@ class UrlRequest(Thread):
         if content_type is not None:
             ct = content_type.split(';')[0]
             if ct == 'application/json':
+                if isinstance(result, bytes):
+                    result = result.decode('utf-8')
                 try:
                     return loads(result)
                 except:
@@ -557,7 +582,7 @@ if __name__ == '__main__':
         pprint('Got an error:')
         pprint(error)
 
-    req = UrlRequest('http://en.wikipedia.org/w/api.php?format'
+    req = UrlRequest('https://en.wikipedia.org/w/api.php?format'
         '=json&action=query&titles=Kivy&prop=revisions&rvprop=content',
         on_success, on_error)
     while not req.is_finished:

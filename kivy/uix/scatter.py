@@ -2,6 +2,9 @@
 Scatter
 =======
 
+.. image:: images/scatter.gif
+    :align: right
+
 :class:`Scatter` is used to build interactive widgets that can be translated,
 rotated and scaled with two or more fingers on a multitouch system.
 
@@ -186,6 +189,9 @@ class Scatter(Widget):
     You can put children outside the bounding box of the scatter and still be
     able to touch them.
 
+    :attr:`do_collide_after_children` is a
+    :class:`~kivy.properties.BooleanProperty` and defaults to False.
+
     .. versionadded:: 1.3.0
     '''
 
@@ -261,7 +267,8 @@ class Scatter(Widget):
                              anchor=self.to_local(*self.center))
     rotation = AliasProperty(_get_rotation, _set_rotation, bind=(
         'x', 'y', 'transform'))
-    '''Rotation value of the scatter.
+    '''Rotation value of the scatter in degrees moving in a counterclockwise
+    direction.
 
     :attr:`rotation` is an :class:`~kivy.properties.AliasProperty` and defaults
     to 0.0.
@@ -469,6 +476,8 @@ class Scatter(Widget):
             return changed
 
         angle = radians(new_line.angle(old_line)) * self.do_rotation
+        if angle:
+            changed = True
         self.apply_transform(Matrix().rotate(angle, 0, 0, 1), anchor=anchor)
 
         if self.do_scale:
@@ -505,9 +514,6 @@ class Scatter(Widget):
         touch.push()
         touch.apply_transform_2d(self.to_local)
         if super(Scatter, self).on_touch_down(touch):
-            # ensure children don't have to do it themselves
-            if 'multitouch_sim' in touch.profile:
-                touch.multitouch_sim = True
             touch.pop()
             self._bring_to_front(touch)
             return True
@@ -564,7 +570,8 @@ class Scatter(Widget):
         input.
 
         :Parameters:
-            `touch`: the touch object which triggered the transformation.
+            `touch`:
+                The touch object which triggered the transformation.
 
         .. versionadded:: 1.8.0
         '''
@@ -576,7 +583,8 @@ class Scatter(Widget):
         front of the parent (only if :attr:`auto_bring_to_front` is True)
 
         :Parameters:
-            `touch`: the touch object which brought the scatter to front.
+            `touch`:
+                The touch object which brought the scatter to front.
 
         .. versionadded:: 1.9.0
         '''
