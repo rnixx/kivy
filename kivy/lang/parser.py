@@ -216,7 +216,8 @@ class ParserRule(object):
 
     __slots__ = ('ctx', 'line', 'name', 'children', 'id', 'properties',
                  'canvas_before', 'canvas_root', 'canvas_after',
-                 'handlers', 'level', 'cache_marked', 'avoid_previous_rules')
+                 'handlers', 'level', 'cache_marked', 'avoid_previous_rules',
+                 'flow_expr')
 
     def __init__(self, ctx, line, name, level):
         super(ParserRule, self).__init__()
@@ -246,6 +247,8 @@ class ParserRule(object):
         self.cache_marked = []
         #: Indicate if any previous rules should be avoided.
         self.avoid_previous_rules = False
+        #: Flow expression
+        self.flow_expr = None
 
         if level == 0:
             self._detect_selectors()
@@ -367,6 +370,7 @@ class Parser(object):
     '''Create a Parser object to parse a Kivy language file or Kivy content.
     '''
 
+    FLOW_CONTROL = ('if', 'elif', 'else', 'for')
     PROP_ALLOWED = ('canvas.before', 'canvas.after')
     CLASS_RANGE = list(range(ord('A'), ord('Z') + 1))
     PROP_RANGE = (
@@ -405,12 +409,12 @@ class Parser(object):
             elif cmd[:4] == 'set ':
                 try:
                     name, value = cmd[4:].strip().split(' ', 1)
-                except:
+                except Exception:
                     Logger.exception('')
                     raise ParserException(self, ln, 'Invalid directive syntax')
                 try:
                     value = eval(value, global_idmap)
-                except:
+                except Exception:
                     Logger.exception('')
                     raise ParserException(self, ln, 'Invalid value')
                 global_idmap[name] = value
@@ -534,6 +538,7 @@ class Parser(object):
         current_object = None
         current_property = None
         current_propobject = None
+        current_flowctl = False
         i = 0
         while i < len(lines):
             line = lines[i]
@@ -574,17 +579,32 @@ class Parser(object):
                     raise ParserException(self, ln,
                                           'Invalid data after declaration')
                 name = x[0].rstrip()
-                # if it's not a root rule, then we got some restriction
-                # aka, a valid name, without point or everything else
-                if count != 0:
+
+                # Check flow control statement
+                flowctrl = name.find(' ') > -1
+
+                # If it's not a root rule, and not a flow control rule, then we
+                # got some restriction aka, a valid name, without point or
+                # everything else
+                if count != 0 and not flowctrl:
                     if False in [ord(z) in Parser.PROP_RANGE for z in name]:
                         raise ParserException(self, ln, 'Invalid class name')
 
-                current_object = ParserRule(self, ln, name, rlevel)
+                # It's a flow control rule
+                if flowctrl:
+                    name, expr = name.split(' ', 1)
+                    name = name.strip()
+                    expr = expr.strip()
+                    current_object = ParserRule(self, ln, name, rlevel)
+                    current_object.flow_expr = expr
+                else:
+                    current_object = ParserRule(self, ln, name, rlevel)
+
                 current_property = None
                 objects.append(current_object)
 
-            # Next level, is it a property or an object ?
+            # Next level, is it a flow control statement, a property or an
+            # object ?
             elif count == indent + spaces:
                 x = content.split(':', 1)
                 if not len(x[0]):
@@ -606,6 +626,54 @@ class Parser(object):
                     current_object.children = _objects
                     lines = _lines
                     i = 0
+
+                # It's a flow control statement, parse next level
+                elif name.find(' ') > -1:
+                    name, expr = name.split(' ', 1)
+                    name = name.strip()
+                    expr = expr.strip()
+
+                    # check if valid flow control statement
+                    if name not in Parser.FLOW_CONTROL:
+                        raise ParserException(self, ln,
+                                              'Unknown flow control statement')
+
+                    if name == 'if':
+                        current_flowctl = True
+                        _objects, _lines = self.parse_level(
+                            level + 1, lines[i:], spaces)
+                        current_object.children = _objects
+                        lines = _lines
+                        i = 0
+
+                    elif name == 'elif':
+                        if not current_flowctl:
+                            raise ParserException(self, ln,
+                                                  'elif without related if')
+                        _objects, _lines = self.parse_level(
+                            level + 1, lines[i:], spaces)
+                        current_object.children = _objects
+                        lines = _lines
+                        i = 0
+
+                    elif name == 'else':
+                        if not current_flowctl:
+                            raise ParserException(self, ln,
+                                                  'else without related if')
+                        _objects, _lines = self.parse_level(
+                            level + 1, lines[i:], spaces)
+                        current_object.children = _objects
+                        lines = _lines
+                        i = 0
+                        current_flowctl = False
+
+                    elif name == 'for':
+                        _objects, _lines = self.parse_level(
+                            level + 1, lines[i:], spaces)
+                        current_object.children = _objects
+                        lines = _lines
+                        i = 0
+                        current_flowctl = False
 
                 # It's a property
                 else:
