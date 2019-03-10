@@ -25,6 +25,26 @@ else_without_related_if = '''
             text: 'Label'
 '''
 
+if_elif_else = '''
+<Widget>:
+    if self.cond_1:
+        Label:
+            text: 'if'
+    elif self.cond_2:
+        Label:
+            text: 'elif'
+    else:
+        Label:
+            text: 'else'
+'''
+
+for_loop = '''
+<Widget>:
+    for it in self.items:
+        Label:
+            text: it.text
+'''
+
 
 ###############################################################################
 # Tests
@@ -34,7 +54,6 @@ class LangFlowTestCase(unittest.TestCase):
 
     def test_elif_without_related_if(self):
         try:
-            Parser.debugger = True
             Parser(content=elif_without_related_if)
             self.fail('Expected to fail')
         except ParserException as e:
@@ -42,12 +61,43 @@ class LangFlowTestCase(unittest.TestCase):
 
     def test_else_without_related_if(self):
         try:
-            Parser.debugger = True
             Parser(content=else_without_related_if)
             self.fail('Expected to fail')
         except ParserException as e:
             # import pdb; pdb.set_trace()
             self.assertTrue(str(e).find('else without related if') > -1)
+
+    def test_parse_if_elif_else(self):
+        parser = Parser(content=if_elif_else)
+        children = parser.rules[0][1].children
+
+        rule = children[0]
+        self.assertEqual(rule.name, 'if')
+        self.assertEqual(rule.flow_expr, 'self.cond_1')
+        self.assertEqual(rule.children[0].name, 'Label')
+        self.assertEqual(rule.children[0].properties['text'].value, "'if'")
+
+        rule = children[1]
+        self.assertEqual(rule.name, 'elif')
+        self.assertEqual(rule.flow_expr, 'self.cond_2')
+        self.assertEqual(rule.children[0].name, 'Label')
+        self.assertEqual(rule.children[0].properties['text'].value, "'elif'")
+
+        rule = children[2]
+        self.assertEqual(rule.name, 'else')
+        self.assertEqual(rule.flow_expr, 'True')
+        self.assertEqual(rule.children[0].name, 'Label')
+        self.assertEqual(rule.children[0].properties['text'].value, "'else'")
+
+    def test_parse_for_loop(self):
+        parser = Parser(content=for_loop)
+        children = parser.rules[0][1].children
+
+        rule = children[0]
+        self.assertEqual(rule.name, 'for')
+        self.assertEqual(rule.flow_expr, 'it in self.items')
+        self.assertEqual(rule.children[0].name, 'Label')
+        self.assertEqual(rule.children[0].properties['text'].value, 'it.text')
 
 
 # condition_rule = """

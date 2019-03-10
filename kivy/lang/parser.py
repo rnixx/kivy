@@ -581,12 +581,7 @@ class Parser(object):
 
                 # Check flow control statement
                 keyword = x[0].split(' ', 1)[0]
-                is_keyword = (
-                    name == 'if' or
-                    name == 'elif' or
-                    name == 'else' or
-                    name == 'for'
-                )
+                is_keyword = keyword in ['if', 'elif', 'else', 'for']
 
                 # If it's not a root rule, and not a flow control rule, then we
                 # got some restriction aka, a valid name, without point or
@@ -604,7 +599,8 @@ class Parser(object):
                     if keyword == 'else':
                         expr = 'True'
                     else:
-                        expr = name.split(' ', 1)[1]
+                        expr = x[0].split(' ', 1)[1]
+                    current_object.name = keyword
                     current_object.flow_expr = expr
 
             # Next level, is it a flow control statement, a property or an
