@@ -217,7 +217,7 @@ class ParserRule(object):
     __slots__ = ('ctx', 'line', 'name', 'children', 'id', 'properties',
                  'canvas_before', 'canvas_root', 'canvas_after',
                  'handlers', 'level', 'cache_marked', 'avoid_previous_rules',
-                 'flow_expr')
+                 'flow_statement')
 
     def __init__(self, ctx, line, name, level):
         super(ParserRule, self).__init__()
@@ -247,8 +247,8 @@ class ParserRule(object):
         self.cache_marked = []
         #: Indicate if any previous rules should be avoided.
         self.avoid_previous_rules = False
-        #: Flow expression
-        self.flow_expr = None
+        #: Flow statement
+        self.flow_statement = None
 
         if level == 0:
             self._detect_selectors()
@@ -537,7 +537,7 @@ class Parser(object):
         current_object = None
         current_property = None
         current_propobject = None
-        current_flowctl = False
+        current_flow_ctrl = False
         i = 0
         while i < len(lines):
             line = lines[i]
@@ -583,9 +583,9 @@ class Parser(object):
                 keyword = x[0].split(' ', 1)[0]
                 is_keyword = keyword in ['if', 'elif', 'else', 'for']
 
-                # If it's not a root rule, and not a flow control rule, then we
-                # got some restriction aka, a valid name, without point or
-                # everything else
+                # If it's not a root rule, and not a flow control statement,
+                # then we got some restriction aka, a valid name, without point
+                # or everything else
                 if count != 0 and not is_keyword:
                     if False in [ord(z) in Parser.PROP_RANGE for z in name]:
                         raise ParserException(self, ln, 'Invalid class name')
@@ -594,14 +594,18 @@ class Parser(object):
                 current_property = None
                 objects.append(current_object)
 
-                # It's a flow control rule
+                # It's a flow control statement
                 if is_keyword:
                     if keyword == 'else':
-                        expr = 'True'
+                        statement = 'True'
                     else:
-                        expr = x[0].split(' ', 1)[1]
+                        try:
+                            statement = x[0].split(' ', 1)[1].strip()
+                        except IndexError:
+                            raise ParserException(
+                                self, ln, 'Incomplete flow control statement')
                     current_object.name = keyword
-                    current_object.flow_expr = expr
+                    current_object.flow_statement = statement
 
             # Next level, is it a flow control statement, a property or an
             # object ?
@@ -610,7 +614,7 @@ class Parser(object):
                 if not len(x[0]):
                     raise ParserException(self, ln, 'Identifier missing')
 
-                # Maybe we have a keyword
+                # Maybe we have a flow control statement
                 keyword = x[0].split(' ', 1)[0]
 
                 # It's a class, add to the current object as a children
@@ -624,22 +628,21 @@ class Parser(object):
                     if ignore_prev:
                         raise ParserException(
                             self, ln, 'clear previous, `-`, not allowed here')
-                    _objects, _lines = self.parse_level(
-                        level + 1, lines[i:], spaces)
-                    current_object.children = _objects
-                    lines = _lines
+                    _o, _l = self.parse_level(level + 1, lines[i:], spaces)
+                    current_object.children = _o
+                    lines = _l
                     i = 0
 
                 # It's a flow control statement, parse next level
                 elif keyword == 'if':
-                    current_flowctl = True
+                    current_flow_ctrl = True
                     _o, _l = self.parse_level(level + 1, lines[i:], spaces)
                     current_object.children = _o
                     lines = _l
                     i = 0
 
                 elif keyword == 'elif':
-                    if not current_flowctl:
+                    if not current_flow_ctrl:
                         raise ParserException(self, ln,
                                               'elif without related if')
                     _o, _l = self.parse_level(level + 1, lines[i:], spaces)
@@ -648,21 +651,21 @@ class Parser(object):
                     i = 0
 
                 elif keyword == 'else':
-                    if not current_flowctl:
+                    if not current_flow_ctrl:
                         raise ParserException(self, ln,
                                               'else without related if')
                     _o, _l = self.parse_level(level + 1, lines[i:], spaces)
                     current_object.children = _o
                     lines = _l
                     i = 0
-                    current_flowctl = False
+                    current_flow_ctrl = False
 
                 elif keyword == 'for':
                     _o, _l = self.parse_level(level + 1, lines[i:], spaces)
                     current_object.children = _o
                     lines = _l
                     i = 0
-                    current_flowctl = False
+                    current_flow_ctrl = False
 
                 # It's a property
                 else:
@@ -701,10 +704,9 @@ class Parser(object):
             elif count == indent + 2 * spaces:
                 if current_property in (
                         'canvas', 'canvas.after', 'canvas.before'):
-                    _objects, _lines = self.parse_level(
-                        level + 2, lines[i:], spaces)
+                    _o, _l = self.parse_level(level + 2, lines[i:], spaces)
                     rl = ParserRule(self, ln, current_property, rlevel)
-                    rl.children = _objects
+                    rl.children = _o
                     if current_property == 'canvas':
                         current_object.canvas_root = rl
                     elif current_property == 'canvas.before':
@@ -712,7 +714,7 @@ class Parser(object):
                     else:
                         current_object.canvas_after = rl
                     current_property = None
-                    lines = _lines
+                    lines = _l
                     i = 0
                 else:
                     if current_propobject is None:

@@ -25,6 +25,30 @@ else_without_related_if = '''
             text: 'Label'
 '''
 
+incomplete_if = '''
+<Widget>:
+    if:
+        Label:
+            text: 'if'
+'''
+
+incomplete_elif = '''
+<Widget>:
+    if self.cond:
+        Label:
+            text: 'if'
+    elif:
+        Label:
+            text: 'elif'
+'''
+
+incomplete_for = '''
+<Widget>:
+    for:
+        Label:
+            text: 'for'
+'''
+
 if_elif_else = '''
 <Widget>:
     if self.cond_1:
@@ -43,6 +67,17 @@ for_loop = '''
     for it in self.items:
         Label:
             text: it.text
+'''
+
+within_graphics_instructions = '''
+<Widget>:
+    canvas:
+        if root.cond:
+            Color:
+                rgba: 1, 1, 1, 1
+        else:
+            Color:
+                rgba: 0, 0, 0, 1
 '''
 
 
@@ -64,8 +99,28 @@ class LangFlowTestCase(unittest.TestCase):
             Parser(content=else_without_related_if)
             self.fail('Expected to fail')
         except ParserException as e:
-            # import pdb; pdb.set_trace()
             self.assertTrue(str(e).find('else without related if') > -1)
+
+    def test_parse_incomplete_if(self):
+        try:
+            Parser(content=incomplete_if)
+            self.fail('Expected to fail')
+        except ParserException as e:
+            self.assertTrue(str(e).find('Incomplete flow control statement') > -1)
+
+    def test_parse_incomplete_elif(self):
+        try:
+            Parser(content=incomplete_elif)
+            self.fail('Expected to fail')
+        except ParserException as e:
+            self.assertTrue(str(e).find('Incomplete flow control statement') > -1)
+
+    def test_parse_incomplete_for(self):
+        try:
+            Parser(content=incomplete_for)
+            self.fail('Expected to fail')
+        except ParserException as e:
+            self.assertTrue(str(e).find('Incomplete flow control statement') > -1)
 
     def test_parse_if_elif_else(self):
         parser = Parser(content=if_elif_else)
@@ -73,19 +128,19 @@ class LangFlowTestCase(unittest.TestCase):
 
         rule = children[0]
         self.assertEqual(rule.name, 'if')
-        self.assertEqual(rule.flow_expr, 'self.cond_1')
+        self.assertEqual(rule.flow_statement, 'self.cond_1')
         self.assertEqual(rule.children[0].name, 'Label')
         self.assertEqual(rule.children[0].properties['text'].value, "'if'")
 
         rule = children[1]
         self.assertEqual(rule.name, 'elif')
-        self.assertEqual(rule.flow_expr, 'self.cond_2')
+        self.assertEqual(rule.flow_statement, 'self.cond_2')
         self.assertEqual(rule.children[0].name, 'Label')
         self.assertEqual(rule.children[0].properties['text'].value, "'elif'")
 
         rule = children[2]
         self.assertEqual(rule.name, 'else')
-        self.assertEqual(rule.flow_expr, 'True')
+        self.assertEqual(rule.flow_statement, 'True')
         self.assertEqual(rule.children[0].name, 'Label')
         self.assertEqual(rule.children[0].properties['text'].value, "'else'")
 
@@ -95,9 +150,25 @@ class LangFlowTestCase(unittest.TestCase):
 
         rule = children[0]
         self.assertEqual(rule.name, 'for')
-        self.assertEqual(rule.flow_expr, 'it in self.items')
+        self.assertEqual(rule.flow_statement, 'it in self.items')
         self.assertEqual(rule.children[0].name, 'Label')
         self.assertEqual(rule.children[0].properties['text'].value, 'it.text')
+
+    def test_parse_within_graphics_instructions(self):
+        parser = Parser(content=within_graphics_instructions)
+        children = parser.rules[0][1].canvas_root.children
+
+        rule = children[0]
+        self.assertEqual(rule.name, 'if')
+        self.assertEqual(rule.flow_statement, 'root.cond')
+        self.assertEqual(rule.children[0].name, 'Color')
+        self.assertEqual(rule.children[0].properties['rgba'].value, "1, 1, 1, 1")
+
+        rule = children[1]
+        self.assertEqual(rule.name, 'else')
+        self.assertEqual(rule.flow_statement, 'True')
+        self.assertEqual(rule.children[0].name, 'Color')
+        self.assertEqual(rule.children[0].properties['rgba'].value, "0, 0, 0, 1")
 
 
 # condition_rule = """
