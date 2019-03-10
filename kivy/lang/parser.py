@@ -370,7 +370,6 @@ class Parser(object):
     '''Create a Parser object to parse a Kivy language file or Kivy content.
     '''
 
-    FLOW_CONTROL = ('if', 'elif', 'else', 'for')
     PROP_ALLOWED = ('canvas.before', 'canvas.after')
     CLASS_RANGE = list(range(ord('A'), ord('Z') + 1))
     PROP_RANGE = (
@@ -581,27 +580,32 @@ class Parser(object):
                 name = x[0].rstrip()
 
                 # Check flow control statement
-                flowctrl = name.find(' ') > -1
+                keyword = x[0].split(' ', 1)[0]
+                is_keyword = (
+                    name == 'if' or
+                    name == 'elif' or
+                    name == 'else' or
+                    name == 'for'
+                )
 
                 # If it's not a root rule, and not a flow control rule, then we
                 # got some restriction aka, a valid name, without point or
                 # everything else
-                if count != 0 and not flowctrl:
+                if count != 0 and not is_keyword:
                     if False in [ord(z) in Parser.PROP_RANGE for z in name]:
                         raise ParserException(self, ln, 'Invalid class name')
 
-                # It's a flow control rule
-                if flowctrl:
-                    name, expr = name.split(' ', 1)
-                    name = name.strip()
-                    expr = expr.strip()
-                    current_object = ParserRule(self, ln, name, rlevel)
-                    current_object.flow_expr = expr
-                else:
-                    current_object = ParserRule(self, ln, name, rlevel)
-
+                current_object = ParserRule(self, ln, name, rlevel)
                 current_property = None
                 objects.append(current_object)
+
+                # It's a flow control rule
+                if is_keyword:
+                    if keyword == 'else':
+                        expr = 'True'
+                    else:
+                        expr = name.split(' ', 1)[1]
+                    current_object.flow_expr = expr
 
             # Next level, is it a flow control statement, a property or an
             # object ?
@@ -609,6 +613,9 @@ class Parser(object):
                 x = content.split(':', 1)
                 if not len(x[0]):
                     raise ParserException(self, ln, 'Identifier missing')
+
+                # Maybe we have a keyword
+                keyword = x[0].split(' ', 1)[0]
 
                 # It's a class, add to the current object as a children
                 current_property = None
@@ -628,52 +635,38 @@ class Parser(object):
                     i = 0
 
                 # It's a flow control statement, parse next level
-                elif name.find(' ') > -1:
-                    name, expr = name.split(' ', 1)
-                    name = name.strip()
-                    expr = expr.strip()
+                elif keyword == 'if':
+                    current_flowctl = True
+                    _o, _l = self.parse_level(level + 1, lines[i:], spaces)
+                    current_object.children = _o
+                    lines = _l
+                    i = 0
 
-                    # check if valid flow control statement
-                    if name not in Parser.FLOW_CONTROL:
+                elif keyword == 'elif':
+                    if not current_flowctl:
                         raise ParserException(self, ln,
-                                              'Unknown flow control statement')
+                                              'elif without related if')
+                    _o, _l = self.parse_level(level + 1, lines[i:], spaces)
+                    current_object.children = _o
+                    lines = _l
+                    i = 0
 
-                    if name == 'if':
-                        current_flowctl = True
-                        _objects, _lines = self.parse_level(
-                            level + 1, lines[i:], spaces)
-                        current_object.children = _objects
-                        lines = _lines
-                        i = 0
+                elif keyword == 'else':
+                    if not current_flowctl:
+                        raise ParserException(self, ln,
+                                              'else without related if')
+                    _o, _l = self.parse_level(level + 1, lines[i:], spaces)
+                    current_object.children = _o
+                    lines = _l
+                    i = 0
+                    current_flowctl = False
 
-                    elif name == 'elif':
-                        if not current_flowctl:
-                            raise ParserException(self, ln,
-                                                  'elif without related if')
-                        _objects, _lines = self.parse_level(
-                            level + 1, lines[i:], spaces)
-                        current_object.children = _objects
-                        lines = _lines
-                        i = 0
-
-                    elif name == 'else':
-                        if not current_flowctl:
-                            raise ParserException(self, ln,
-                                                  'else without related if')
-                        _objects, _lines = self.parse_level(
-                            level + 1, lines[i:], spaces)
-                        current_object.children = _objects
-                        lines = _lines
-                        i = 0
-                        current_flowctl = False
-
-                    elif name == 'for':
-                        _objects, _lines = self.parse_level(
-                            level + 1, lines[i:], spaces)
-                        current_object.children = _objects
-                        lines = _lines
-                        i = 0
-                        current_flowctl = False
+                elif keyword == 'for':
+                    _o, _l = self.parse_level(level + 1, lines[i:], spaces)
+                    current_object.children = _o
+                    lines = _l
+                    i = 0
+                    current_flowctl = False
 
                 # It's a property
                 else:
