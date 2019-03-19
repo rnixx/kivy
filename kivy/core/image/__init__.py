@@ -370,7 +370,7 @@ class ImageLoader(object):
                         continue
                     break
                 if im is not None:
-                    # append ImageData to local variable before it's
+                    # append ImageData to local variable before its
                     # overwritten
                     image_data.append(im._data[0])
                     image = im
@@ -741,7 +741,6 @@ class Image(EventDispatcher):
                 self._set_filename(value)
             else:
                 self._texture = None
-                self._img_iterate()
             return
         else:
             # if we already got a texture, it will be automatically reloaded.
