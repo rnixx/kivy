@@ -47,7 +47,12 @@ cdef class _WindowSDL2Storage:
         cdef str name = None
         if not self.event_filter:
             return 1
-        if event.type == SDL_APP_TERMINATING:
+        if event.type == SDL_WINDOWEVENT:
+            if event.window.event == SDL_WINDOWEVENT_RESIZED:
+                action = ('windowresized',
+                          event.window.data1, event.window.data2)
+                return self.event_filter(*action)
+        elif event.type == SDL_APP_TERMINATING:
             name = 'app_terminating'
         elif event.type == SDL_APP_LOWMEMORY:
             name = 'app_lowmemory'
@@ -240,6 +245,10 @@ cdef class _WindowSDL2Storage:
         SDL_ShowCursor(value)
 
     def set_system_cursor(self, str name):
+        # prevent the compiler to not be happy because of
+        # an unitialized value (return False in Cython is not a direct
+        # return 0 in C)
+        cdef SDL_SystemCursor num = SDL_SYSTEM_CURSOR_ARROW
         if name == 'arrow':
             num = SDL_SYSTEM_CURSOR_ARROW
         elif name == 'ibeam':
@@ -249,7 +258,7 @@ cdef class _WindowSDL2Storage:
         elif name == 'crosshair':
             num = SDL_SYSTEM_CURSOR_CROSSHAIR
         elif name == 'wait_arrow':
-            SDL_SYSTEM_CURSOR_WAITARROW
+            num = SDL_SYSTEM_CURSOR_WAITARROW
         elif name == 'size_nwse':
             num = SDL_SYSTEM_CURSOR_SIZENWSE
         elif name == 'size_nesw':
@@ -519,7 +528,6 @@ cdef class _WindowSDL2Storage:
     def poll(self):
         cdef SDL_Event event
         cdef int rv
-
         with nogil:
             rv = SDL_PollEvent(&event)
         if rv == 0:
@@ -541,11 +549,14 @@ cdef class _WindowSDL2Storage:
             action = 'mousebuttondown' if event.type == SDL_MOUSEBUTTONDOWN else 'mousebuttonup'
             return (action, x, y, button)
         elif event.type == SDL_MOUSEWHEEL:
-            x = event.button.x
-            y = event.button.y
-            button = event.button.button
-            action = 'mousewheel' + ('down' if x > 0 else 'up') if x != 0 else ('left' if y < 0 else 'right')
-            return (action, x, y, button)
+            x = event.wheel.x
+            y = event.wheel.y
+            if x != 0:
+                suffix = 'left' if x > 0 else 'right'
+            else:
+                suffix = 'down' if y > 0 else 'up'
+            action = 'mousewheel' + suffix
+            return (action, x, y, None)
         elif event.type == SDL_FINGERMOTION:
             fid = event.tfinger.fingerId
             x = event.tfinger.x

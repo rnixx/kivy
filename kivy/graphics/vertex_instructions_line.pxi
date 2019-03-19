@@ -298,7 +298,7 @@ cdef class Line(VertexInstruction):
         self.batch.set_mode('triangles')
         cdef unsigned long vertices_count = (count - 1) * 4
         cdef unsigned long indices_count = (count - 1) * 6
-        cdef unsigned int iv = 0, ii = 0
+        cdef unsigned int iv = 0, ii = 0, siv = 0
 
         if self._joint == LINE_JOINT_BEVEL:
             indices_count += (count - 2) * 3
@@ -652,7 +652,8 @@ cdef class Line(VertexInstruction):
             ii += 1
 
         # compute bbox
-        for i in xrange(vertices_count):
+        cdef unsigned long iul
+        for iul in xrange(vertices_count):
             if vertices[i].x < self._bxmin:
                 self._bxmin = vertices[i].x
             if vertices[i].x > self._bxmax:
