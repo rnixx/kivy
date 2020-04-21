@@ -87,6 +87,7 @@ except ImportError:
 from kivy.clock import Clock
 from kivy.weakmethod import WeakMethod
 from kivy.logger import Logger
+from kivy.utils import platform
 
 
 # list to save UrlRequest and prevent GC on un-referenced objects
@@ -209,12 +210,17 @@ class UrlRequest(Thread):
         self._chunk_size = chunk_size
         self._timeout = timeout
         self._method = method
-        self.ca_file = ca_file
         self.verify = verify
         self._proxy_host = proxy_host
         self._proxy_port = proxy_port
         self._proxy_headers = proxy_headers
         self._cancel_event = Event()
+
+        if platform in ['android', 'ios']:
+            import certifi
+            self.ca_file = ca_file or certifi.where()
+        else:
+            self.ca_file = ca_file
 
         #: Url of the request
         self.url = url
@@ -460,11 +466,22 @@ class UrlRequest(Thread):
             except IndexError:
                 return
             if resp:
+                # Small workaround in order to prevent the situation mentioned
+                # in the comment below
+                final_cookies = ""
+                parsed_headers = []
+                for key, value in resp.getheaders():
+                    if key == "Set-Cookie":
+                        final_cookies += "{};".format(value)
+                    else:
+                        parsed_headers.append((key, value))
+                parsed_headers.append(("Set-Cookie", final_cookies[:-1]))
+
                 # XXX usage of dict can be dangerous if multiple headers
                 # are set even if it's invalid. But it look like it's ok
                 # ?  http://stackoverflow.com/questions/2454494/..
                 # ..urllib2-multiple-set-cookie-headers-in-response
-                self._resp_headers = dict(resp.getheaders())
+                self._resp_headers = dict(parsed_headers)
                 self._resp_status = resp.status
             if result == 'success':
                 status_class = resp.status // 100

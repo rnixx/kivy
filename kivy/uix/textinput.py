@@ -16,7 +16,7 @@ are supported.
 The :class:`TextInput` uses two different coordinate systems:
 
 * (x, y) - coordinates in pixels, mostly used for rendering on screen.
-* (row, col) - cursor index in characters / lines, used for selection
+* (col, row) - cursor index in characters / lines, used for selection
   and cursor movement.
 
 
@@ -499,6 +499,11 @@ class TextInput(FocusBehavior, Widget):
         self._do_blink_cursor_ev = Clock.create_trigger(
             self._do_blink_cursor, .5, interval=True)
         self._refresh_line_options_ev = None
+
+        # [from; to) range of lines being partially or fully rendered
+        # in TextInput's viewport
+        self._visible_lines_range = 0, 0
+
         self.interesting_keys = {
             8: 'backspace',
             13: 'enter',
@@ -616,7 +621,7 @@ class TextInput(FocusBehavior, Widget):
         return offset
 
     def get_cursor_from_index(self, index):
-        '''Return the (row, col) of the cursor from text index.
+        '''Return the (col, row) of the cursor from text index.
         '''
         index = boundary(index, 0, len(self.text))
         if index <= 0:
@@ -662,7 +667,7 @@ class TextInput(FocusBehavior, Widget):
         '''
         self.select_text(0, len(self.text))
 
-    re_indent = re.compile('^(\s*|)')
+    re_indent = re.compile(r'^(\s*|)')
 
     def _auto_indent(self, substring):
         index = self.cursor_index()
@@ -1186,10 +1191,15 @@ class TextInput(FocusBehavior, Widget):
                         row += 1
                 else:
                     col, row = col + 1, row
-        self.cursor = (col, row)
+
+        dont_move_cursor = control and action in ['cursor_up', 'cursor_down']
+        if dont_move_cursor:
+            self._trigger_update_graphics()
+        else:
+            self.cursor = (col, row)
 
     def get_cursor_from_xy(self, x, y):
-        '''Return the (row, col) of the cursor from an (x, y) position.
+        '''Return the (col, row) of the cursor from an (x, y) position.
         '''
         padding_left = self.padding[0]
         padding_top = self.padding[1]
@@ -1364,27 +1374,32 @@ class TextInput(FocusBehavior, Widget):
 
         # Check for scroll wheel
         if 'button' in touch.profile and touch.button.startswith('scroll'):
+            # TODO: implement 'scrollleft' and 'scrollright'
             scroll_type = touch.button[6:]
             if scroll_type == 'down':
                 if self.multiline:
-                    if self.scroll_y <= 0:
-                        return True
-                    self.scroll_y -= self.line_height
+                    if self.scroll_y > 0:
+                        self.scroll_y -= self.line_height
+                        self._trigger_update_graphics()
                 else:
-                    if self.scroll_x <= 0:
-                        return True
-                    self.scroll_x -= self.line_height
+                    if self.scroll_x > 0:
+                        self.scroll_x -= self.line_height
+                        self._trigger_update_graphics()
             if scroll_type == 'up':
                 if self.multiline:
-                    if (self._lines_rects[-1].pos[1] > self.y +
-                            self.line_height):
-                        return True
-                    self.scroll_y += self.line_height
+                    viewport_height = self.height\
+                                      - self.padding[1] - self.padding[3]
+                    text_height = len(self._lines) * (self.line_height
+                                                      + self.line_spacing)
+                    if viewport_height < text_height - self.scroll_y:
+                        self.scroll_y += self.line_height
+                        self._trigger_update_graphics()
                 else:
-                    if (self.scroll_x + self.width >=
+                    if (self.scroll_x + self.width <
                             self._lines_rects[-1].texture.size[0]):
-                        return True
-                    self.scroll_x += self.line_height
+                        self.scroll_x += self.line_height
+                        self._trigger_update_graphics()
+            return True
 
         touch.grab(self)
         self._touch_count += 1
@@ -1619,8 +1634,7 @@ class TextInput(FocusBehavior, Widget):
         if bubble is None:
             self._bubble = bubble = TextInputCutCopyPaste(textinput=self)
             self.fbind('parent', self._show_cut_copy_paste, pos, win, True)
-            win.bind(
-                size=lambda *args: self._hide_cut_copy_paste(win))
+            self.bind(focus=lambda *args: self._hide_cut_copy_paste(win))
             self.bind(cursor_pos=lambda *args: self._hide_cut_copy_paste(win))
         else:
             win.remove_widget(bubble)
@@ -1915,39 +1929,39 @@ class TextInput(FocusBehavior, Widget):
 
     def _insert_lines(self, start, finish, len_lines, _lines_flags,
                       _lines, _lines_labels, _line_rects):
-            self_lines_flags = self._lines_flags
-            _lins_flags = []
-            _lins_flags.extend(self_lines_flags[:start])
-            if len_lines:
-                # if not inserting at first line then
-                if start:
-                    # make sure line flags restored for first line
-                    # _split_smart assumes first line to be not a new line
-                    _lines_flags[0] = self_lines_flags[start]
-                _lins_flags.extend(_lines_flags)
-            _lins_flags.extend(self_lines_flags[finish:])
-            self._lines_flags = _lins_flags
+        self_lines_flags = self._lines_flags
+        _lins_flags = []
+        _lins_flags.extend(self_lines_flags[:start])
+        if len_lines:
+            # if not inserting at first line then
+            if start:
+                # make sure line flags restored for first line
+                # _split_smart assumes first line to be not a new line
+                _lines_flags[0] = self_lines_flags[start]
+            _lins_flags.extend(_lines_flags)
+        _lins_flags.extend(self_lines_flags[finish:])
+        self._lines_flags = _lins_flags
 
-            _lins_lbls = []
-            _lins_lbls.extend(self._lines_labels[:start])
-            if len_lines:
-                _lins_lbls.extend(_lines_labels)
-            _lins_lbls.extend(self._lines_labels[finish:])
-            self._lines_labels = _lins_lbls
+        _lins_lbls = []
+        _lins_lbls.extend(self._lines_labels[:start])
+        if len_lines:
+            _lins_lbls.extend(_lines_labels)
+        _lins_lbls.extend(self._lines_labels[finish:])
+        self._lines_labels = _lins_lbls
 
-            _lins_rcts = []
-            _lins_rcts.extend(self._lines_rects[:start])
-            if len_lines:
-                _lins_rcts.extend(_line_rects)
-            _lins_rcts.extend(self._lines_rects[finish:])
-            self._lines_rects = _lins_rcts
+        _lins_rcts = []
+        _lins_rcts.extend(self._lines_rects[:start])
+        if len_lines:
+            _lins_rcts.extend(_line_rects)
+        _lins_rcts.extend(self._lines_rects[finish:])
+        self._lines_rects = _lins_rcts
 
-            _lins = []
-            _lins.extend(self._lines[:start])
-            if len_lines:
-                _lins.extend(_lines)
-            _lins.extend(self._lines[finish:])
-            self._lines = _lins
+        _lins = []
+        _lins.extend(self._lines[:start])
+        if len_lines:
+            _lins.extend(_lines)
+        _lins.extend(self._lines[finish:])
+        self._lines = _lins
 
     def _trigger_update_graphics(self, *largs):
         self._update_graphics_ev.cancel()
@@ -1994,8 +2008,12 @@ class TextInput(FocusBehavior, Widget):
         find_base_dir = Label.find_base_direction
         auto_halign_r = halign == 'auto' and base_dir and 'rtl' in base_dir
 
+        fst_visible_ln = None
         for line_num, value in enumerate(lines):
-            if miny <= y <= maxy + dy:
+            if miny < y < maxy + dy:
+                if fst_visible_ln is None:
+                    fst_visible_ln = line_num
+
                 texture = labels[line_num]
                 size = list(texture.size)
                 texc = texture.tex_coords[:]
@@ -2065,8 +2083,16 @@ class TextInput(FocusBehavior, Widget):
                 r.texture = texture
                 r.tex_coords = texc
                 add(r)
+            elif y <= miny:
+                line_num -= 1
+                break
 
             y -= dy
+
+        if fst_visible_ln is not None:
+            self._visible_lines_range = (fst_visible_ln, line_num + 1)
+        else:
+            self._visible_lines_range = 0, 0
 
         self._update_graphics_selection()
 
@@ -2186,13 +2212,25 @@ class TextInput(FocusBehavior, Widget):
         else:
             x = left + cursor_offset - self.scroll_x
 
-        if x < left:
-            self.scroll_x = 0
-            x = left
-        if y > top:
-            y = top
-            self.scroll_y = 0
         return x, y
+
+    def _get_cursor_visual_height(self):
+        # Return the height of the cursor's visible part
+        _, cy = map(int, self.cursor_pos)
+        max_y = self.top - self.padding[1]
+        min_y = self.y + self.padding[3]
+
+        lh = self.line_height
+        if cy > max_y:
+            return lh - min(lh, cy - max_y)
+        else:
+            return min(lh, max(0, cy - min_y))
+
+    def _get_cursor_visual_pos(self):
+        # Return the position of the cursor's top visible point
+        cx, cy = map(int, self.cursor_pos)
+        max_y = self.top - self.padding[3]
+        return [cx, min(max_y, cy)]
 
     def _get_line_options(self):
         # Get or create line options, to be used for Label creation
@@ -2420,8 +2458,9 @@ class TextInput(FocusBehavior, Widget):
         win = EventLoop.window
 
         # This allows *either* ctrl *or* cmd, but not both.
-        is_shortcut = (modifiers == ['ctrl'] or (
-            _is_osx and modifiers == ['meta']))
+        modifiers = set(modifiers) - {'capslock', 'numlock'}
+        is_shortcut = (modifiers == {'ctrl'} or (
+            _is_osx and modifiers == {'meta'}))
         is_interesting_key = key in (list(self.interesting_keys.keys()) + [27])
 
         if not self.write_tab and super(TextInput,
@@ -2575,6 +2614,12 @@ class TextInput(FocusBehavior, Widget):
     _insert_int_pat = re.compile(u'^-?[0-9]*$')
     _insert_float_pat = re.compile(u'^-?[0-9]*\\.?[0-9]*$')
     _cursor_blink = BooleanProperty(False)
+    _cursor_visual_pos = AliasProperty(
+        _get_cursor_visual_pos, None, bind=['cursor_pos']
+    )
+    _cursor_visual_height = AliasProperty(
+        _get_cursor_visual_height, None, bind=['cursor_pos']
+    )
 
     readonly = BooleanProperty(False)
     '''If True, the user will not be able to change the content of a textinput.
@@ -2696,8 +2741,8 @@ class TextInput(FocusBehavior, Widget):
         return True
 
     cursor = AliasProperty(_get_cursor, _set_cursor)
-    '''Tuple of (row, col) values indicating the current cursor position.
-    You can set a new (row, col) if you want to move the cursor. The scrolling
+    '''Tuple of (col, row) values indicating the current cursor position.
+    You can set a new (col, row) if you want to move the cursor. The scrolling
     area will be automatically updated to ensure that the cursor is
     visible inside the viewport.
 
@@ -2724,9 +2769,11 @@ class TextInput(FocusBehavior, Widget):
     cursor[1], read-only.
     '''
 
-    cursor_pos = AliasProperty(_get_cursor_pos, None, bind=(
-        'cursor', 'padding', 'pos', 'size', 'focus',
-        'scroll_x', 'scroll_y'))
+    cursor_pos = AliasProperty(_get_cursor_pos, None,
+                               bind=('cursor', 'padding', 'pos', 'size',
+                                     'focus', 'scroll_x', 'scroll_y',
+                                     'line_height', 'line_spacing'),
+                               cache=False)
     '''Current position of the cursor, in (x, y).
 
     :attr:`cursor_pos` is an :class:`~kivy.properties.AliasProperty`,
@@ -2774,7 +2821,7 @@ class TextInput(FocusBehavior, Widget):
     defaults to 4.
     '''
 
-    padding_x = VariableListProperty([0, 0], length=2)
+    padding_x = VariableListProperty([0, 0], length=2, deprecated=True)
     '''Horizontal padding of the text: [padding_left, padding_right].
 
     padding_x also accepts a one argument form [padding_horizontal].
@@ -2790,7 +2837,7 @@ class TextInput(FocusBehavior, Widget):
         self.padding[0] = value[0]
         self.padding[2] = value[1]
 
-    padding_y = VariableListProperty([0, 0], length=2)
+    padding_y = VariableListProperty([0, 0], length=2, deprecated=True)
     '''Vertical padding of the text: [padding_top, padding_bottom].
 
     padding_y also accepts a one argument form [padding_vertical].
@@ -3060,7 +3107,7 @@ class TextInput(FocusBehavior, Widget):
         self._refresh_text(text)
         self.cursor = self.get_cursor_from_index(len(text))
 
-    text = AliasProperty(_get_text, _set_text, bind=('_lines', ))
+    text = AliasProperty(_get_text, _set_text, bind=('_lines',))
     '''Text of the widget.
 
     Creation of a simple hello world::
@@ -3101,7 +3148,7 @@ class TextInput(FocusBehavior, Widget):
     '''Font size of the text in pixels.
 
     :attr:`font_size` is a :class:`~kivy.properties.NumericProperty` and
-    defaults to 15\ :attr:`~kivy.metrics.sp`.
+    defaults to 15 :attr:`~kivy.metrics.sp`.
     '''
 
     font_context = StringProperty(None, allownone=True)
@@ -3254,11 +3301,12 @@ class TextInput(FocusBehavior, Widget):
         return (len(self._lines) * (self.line_height + self.line_spacing) +
                 self.padding[1] + self.padding[3])
 
-    minimum_height = AliasProperty(_get_min_height, None,
+    minimum_height = AliasProperty(_get_min_height,
                                    bind=('_lines', 'line_spacing', 'padding',
                                          'font_size', 'font_name', 'password',
                                          'font_context', 'hint_text',
-                                         'line_height'))
+                                         'line_height'),
+                                   cache=True)
     '''Minimum height of the content inside the TextInput.
 
     .. versionadded:: 1.8.0

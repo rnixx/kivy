@@ -554,7 +554,8 @@ class Inspector(FloatLayout):
 
     def keyboard_shortcut(self, win, scancode, *largs):
         modifiers = largs[-1]
-        if scancode == 101 and modifiers == ['ctrl']:
+        if scancode == 101 and set(modifiers) & {'ctrl'} and not set(
+                modifiers) & {'shift', 'alt', 'meta'}:
             self.activated = not self.activated
             if self.activated:
                 self.inspect_enabled = True
@@ -752,7 +753,7 @@ def start(win, ctx):
 def stop(win, ctx):
     '''Stop and unload any active Inspectors for the given *ctx*.'''
     if hasattr(ctx, 'ev_late_create'):
-        Clock.unschedule(ctx.ev_late_create)
+        ctx.ev_late_create.cancel()
         del ctx.ev_late_create
     if hasattr(ctx, 'inspector'):
         win.unbind(children=ctx.inspector.on_window_children,

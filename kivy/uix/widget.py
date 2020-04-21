@@ -291,12 +291,21 @@ class Widget(WidgetBase):
     '''Widget class. See module documentation for more information.
 
     :Events:
-        `on_touch_down`:
-            Fired when a new touch event occurs
-        `on_touch_move`:
-            Fired when an existing touch moves
-        `on_touch_up`:
-            Fired when an existing touch disappears
+        `on_touch_down`: `(touch, )`
+            Fired when a new touch event occurs. `touch` is the touch object.
+        `on_touch_move`: `(touch, )`
+            Fired when an existing touch moves. `touch` is the touch object.
+        `on_touch_up`: `(touch, )`
+            Fired when an existing touch disappears. `touch` is the touch
+            object.
+        `on_kv_post`: `(base_widget, )`
+            Fired after all the kv rules associated with the widget
+            and all other widgets that are in any of those rules have had
+            all their kv rules applied. `base_widget` is the base-most widget
+            whose instantiation triggered the kv rules (i.e. the widget
+            instantiated from Python, e.g. ``MyWidget()``).
+
+            .. versionchanged:: 1.11.0
 
     .. warning::
         Adding a `__del__` method to a class derived from Widget with Python
@@ -316,7 +325,8 @@ class Widget(WidgetBase):
     '''
 
     __metaclass__ = WidgetMetaclass
-    __events__ = ('on_touch_down', 'on_touch_move', 'on_touch_up')
+    __events__ = (
+        'on_touch_down', 'on_touch_move', 'on_touch_up', 'on_kv_post')
     _proxy_ref = None
 
     def __init__(self, **kwargs):
@@ -345,7 +355,14 @@ class Widget(WidgetBase):
 
         # Apply all the styles.
         if not no_builder:
-            Builder.apply(self, ignored_consts=self._kwargs_applied_init)
+            rule_children = []
+            self.apply_class_lang_rules(
+                ignored_consts=self._kwargs_applied_init,
+                rule_children=rule_children)
+
+            for widget in rule_children:
+                widget.dispatch('on_kv_post', self)
+            self.dispatch('on_kv_post', self)
 
         # Bind all the events.
         if on_args:
@@ -375,9 +392,77 @@ class Widget(WidgetBase):
     def __hash__(self):
         return id(self)
 
-    @property
-    def __self__(self):
-        return self
+    def apply_class_lang_rules(
+            self, root=None, ignored_consts=set(), rule_children=None):
+        '''
+        Method that is called by kivy to apply the kv rules of this widget's
+        class.
+
+        :Parameters:
+            `root`: :class:`Widget`
+                The root widget that instantiated this widget in kv, if the
+                widget was instantiated in kv, otherwise ``None``.
+            `ignored_consts`: set
+                (internal) See :meth:`~kivy.lang.builder.BuilderBase.apply`.
+            `rule_children`: list
+                (internal) See :meth:`~kivy.lang.builder.BuilderBase.apply`.
+
+        This is useful to be able to execute code before/after the class kv
+        rules are applied to the widget. E.g. if the kv code requires some
+        properties to be initialized before it is used in a binding rule.
+        If overwriting remember to call ``super``, otherwise the kv rules will
+        not be applied.
+
+        In the following example,
+
+        .. code-block:: python
+
+            class MyWidget(Widget):
+                pass
+
+            class OtherWidget(MyWidget):
+                pass
+
+        .. code-block:: kv
+
+        <MyWidget>:
+            my_prop: some_value
+
+        <OtherWidget>:
+            other_prop: some_value
+
+        When ``OtherWidget`` is instantiated with ``OtherWidget()``, the
+        widget's :meth:`apply_class_lang_rules` is called and it applies the
+        kv rules of this class - ``<MyWidget>`` and ``<OtherWidget>``.
+
+        Similarly, when the widget is instantiated from kv, e.g.
+
+        .. code-block:: kv
+
+            <MyBox@BoxLayout>:
+                height: 55
+                OtherWidget:
+                    width: 124
+
+        ``OtherWidget``'s :meth:`apply_class_lang_rules` is called and it
+        applies the kv rules of this class - ``<MyWidget>`` and
+        ``<OtherWidget>``.
+
+        .. note::
+
+            It applies only the class rules not the instance rules. I.e. in the
+            above kv example in the ``MyBox`` rule when ``OtherWidget`` is
+            instantiated, its :meth:`apply_class_lang_rules` applies the
+            ``<MyWidget>`` and ``<OtherWidget>`` rules to it - it does not
+            apply the ``width: 124`` rule. The ``width: 124`` rule is part of
+            the ``MyBox`` rule and is applied by the ``MyBox``'s instance's
+            :meth:`apply_class_lang_rules`.
+
+        .. versionchanged:: 1.11.0
+        '''
+        Builder.apply(
+            self, ignored_consts=ignored_consts,
+            rule_children=rule_children)
 
     #
     # Collision
@@ -481,6 +566,9 @@ class Widget(WidgetBase):
         for child in self.children[:]:
             if child.dispatch('on_touch_up', touch):
                 return True
+
+    def on_kv_post(self, base_widget):
+        pass
 
     #
     # Tree management
@@ -865,18 +953,24 @@ class Widget(WidgetBase):
                 return
 
     def to_widget(self, x, y, relative=False):
-        '''Convert the given coordinate from window to local widget
-        coordinates. See :mod:`~kivy.uix.relativelayout` for details on the
-        coordinate systems.
+        '''Convert the coordinate from window to local (current widget)
+        coordinates.
+
+        See :mod:`~kivy.uix.relativelayout` for details on the coordinate
+        systems.
         '''
         if self.parent:
             x, y = self.parent.to_widget(x, y)
         return self.to_local(x, y, relative=relative)
 
     def to_window(self, x, y, initial=True, relative=False):
-        '''Transform local coordinates to window coordinates. See
-        :mod:`~kivy.uix.relativelayout` for details on the coordinate systems.
-        '''
+        """If ``initial`` is True, the default, it transforms **parent**
+        coordinates to window coordinates. Otherwise, it transforms **local**
+        (current widget) coordinates to window coordinates.
+
+        See :mod:`~kivy.uix.relativelayout` for details on the coordinate
+        systems.
+        """
         if not initial:
             x, y = self.to_parent(x, y, relative=relative)
         if self.parent:
@@ -885,27 +979,31 @@ class Widget(WidgetBase):
         return (x, y)
 
     def to_parent(self, x, y, relative=False):
-        '''Transform local coordinates to parent coordinates. See
-        :mod:`~kivy.uix.relativelayout` for details on the coordinate systems.
+        """Transform local (current widget) coordinates to parent coordinates.
+
+        See :mod:`~kivy.uix.relativelayout` for details on the coordinate
+        systems.
 
         :Parameters:
             `relative`: bool, defaults to False
                 Change to True if you want to translate relative positions from
                 a widget to its parent coordinates.
-        '''
+        """
         if relative:
             return (x + self.x, y + self.y)
         return (x, y)
 
     def to_local(self, x, y, relative=False):
-        '''Transform parent coordinates to local coordinates. See
-        :mod:`~kivy.uix.relativelayout` for details on the coordinate systems.
+        """Transform parent coordinates to local (current widget) coordinates.
+
+        See :mod:`~kivy.uix.relativelayout` for details on the coordinate
+        systems.
 
         :Parameters:
             `relative`: bool, defaults to False
                 Change to True if you want to translate coordinates to
                 relative widget coordinates.
-        '''
+        """
         if relative:
             return (x - self.x, y - self.y)
         return (x, y)
@@ -989,7 +1087,9 @@ class Widget(WidgetBase):
     def set_right(self, value):
         self.x = value - self.width
 
-    right = AliasProperty(get_right, set_right, bind=('x', 'width'))
+    right = AliasProperty(get_right, set_right,
+                          bind=('x', 'width'),
+                          cache=True)
     '''Right position of the widget.
 
     :attr:`right` is an :class:`~kivy.properties.AliasProperty` of
@@ -1002,7 +1102,9 @@ class Widget(WidgetBase):
     def set_top(self, value):
         self.y = value - self.height
 
-    top = AliasProperty(get_top, set_top, bind=('y', 'height'))
+    top = AliasProperty(get_top, set_top,
+                        bind=('y', 'height'),
+                        cache=True)
     '''Top position of the widget.
 
     :attr:`top` is an :class:`~kivy.properties.AliasProperty` of
@@ -1015,7 +1117,9 @@ class Widget(WidgetBase):
     def set_center_x(self, value):
         self.x = value - self.width / 2.
 
-    center_x = AliasProperty(get_center_x, set_center_x, bind=('x', 'width'))
+    center_x = AliasProperty(get_center_x, set_center_x,
+                             bind=('x', 'width'),
+                             cache=True)
     '''X center position of the widget.
 
     :attr:`center_x` is an :class:`~kivy.properties.AliasProperty` of
@@ -1028,7 +1132,9 @@ class Widget(WidgetBase):
     def set_center_y(self, value):
         self.y = value - self.height / 2.
 
-    center_y = AliasProperty(get_center_y, set_center_y, bind=('y', 'height'))
+    center_y = AliasProperty(get_center_y, set_center_y,
+                             bind=('y', 'height'),
+                             cache=True)
     '''Y center position of the widget.
 
     :attr:`center_y` is an :class:`~kivy.properties.AliasProperty` of
@@ -1044,23 +1150,6 @@ class Widget(WidgetBase):
 
     cls = ListProperty([])
     '''Class of the widget, used for styling.
-    '''
-
-    id = StringProperty(None, allownone=True)
-    '''Identifier of the widget in the tree.
-
-    :attr:`id` is a :class:`~kivy.properties.StringProperty` and defaults to
-    None.
-
-    .. note::
-
-        The :attr:`id` is not the same as ``id`` in the kv language. For the
-        latter, see :attr:`ids` and :ref:`Kivy Language: ids <kv-lang-ids>`.
-
-    .. warning::
-
-        The :attr:`id` property has been deprecated and will be removed
-        completely in future versions.
     '''
 
     children = ListProperty([])
@@ -1130,7 +1219,7 @@ class Widget(WidgetBase):
 
     pos_hint = ObjectProperty({})
     '''Position hint. This property allows you to set the position of
-    the widget inside its parent layout, in percent (similar to
+    the widget inside its parent layout (similar to
     size_hint).
 
     For example, if you want to set the top of the widget to be at 90%

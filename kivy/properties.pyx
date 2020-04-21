@@ -296,7 +296,7 @@ cpdef float dpi2px(value, ext) except *:
         g_dpi = Metrics.dpi
         g_density = Metrics.density
         g_fontscale = Metrics.fontscale
-    cdef float rv = float(value)
+    cdef float rv = <float>float(value)
     if ext == 'in':
         return rv * g_dpi
     elif ext == 'px':
@@ -306,11 +306,11 @@ cpdef float dpi2px(value, ext) except *:
     elif ext == 'sp':
         return rv * g_density * g_fontscale
     elif ext == 'pt':
-        return rv * g_dpi / 72.
+        return rv * g_dpi / <float>72.
     elif ext == 'cm':
-        return rv * g_dpi / 2.54
+        return rv * g_dpi / <float>2.54
     elif ext == 'mm':
-        return rv * g_dpi / 25.4
+        return rv * g_dpi / <float>25.4
 
 cdef class Property:
     '''Base class for building more complex properties.
@@ -364,11 +364,18 @@ cdef class Property:
                 When not None, it's called with two values to be compared.
                 The function returns whether they are considered the same.
 
+            `deprecated`: bool
+                When True, a warning will be logged if the property is accessed
+                or set. Defaults to False.
+
     .. versionchanged:: 1.4.2
         Parameters errorhandler and errorvalue added
 
     .. versionchanged:: 1.9.0
         Parameter force_dispatch added
+
+    .. versionchanged:: 1.11.0
+        Parameter deprecated added
     '''
 
     def __cinit__(self):
@@ -380,6 +387,7 @@ cdef class Property:
         self.errorhandler = None
         self.errorvalue_set = 0
         self.comparator = None
+        self.deprecated = 0
 
     def __init__(self, defaultvalue, **kw):
         self.defaultvalue = defaultvalue
@@ -388,6 +396,7 @@ cdef class Property:
         self.errorvalue = kw.get('errorvalue', None)
         self.errorhandler = kw.get('errorhandler', None)
         self.comparator = kw.get('comparator', None)
+        self.deprecated = <int>kw.get('deprecated', 0)
 
         if 'errorvalue' in kw:
             self.errorvalue_set = 1
@@ -480,11 +489,22 @@ cdef class Property:
         ps.observers.unbind_uid(uid)
 
     def __set__(self, EventDispatcher obj, val):
+        if self.deprecated:
+            Logger.warning(
+                'Deprecated property "{}" of object "{}" has been set, it '
+                'will be removed in a future version'.format(self, obj))
+            self.deprecated = 0
         self.set(obj, val)
 
     def __get__(self, EventDispatcher obj, objtype):
         if obj is None:
             return self
+
+        if self.deprecated:
+            Logger.warning(
+                'Deprecated property "{}" of object "{}" was accessed, it '
+                'will be removed in a future version'.format(self, obj))
+            self.deprecated = 0
         return self.get(obj)
 
     cdef compare_value(self, a, b):
@@ -642,7 +662,7 @@ cdef class NumericProperty(Property):
         if value[-2:] in NUMERIC_FORMATS:
             return self.parse_list(obj, value[:-2], value[-2:])
         else:
-            return float(value)
+            return <float>float(value)
 
     cdef float parse_list(self, EventDispatcher obj, value, ext) except *:
         cdef PropertyStorage ps = obj.__storage[self._name]
@@ -679,7 +699,7 @@ cdef class StringProperty(Property):
                 obj.__class__.__name__,
                 self.name))
 
-cdef inline void observable_list_dispatch(object self):
+cdef inline void observable_list_dispatch(object self) except *:
     cdef Property prop = self.prop
     obj = self.obj()
     if obj is not None:
@@ -794,15 +814,16 @@ cdef class ListProperty(Property):
             [1, 5, {'hi': 'bye'}, 10] [1, 5, {'hi': 'bye'}]
 
     '''
-    def __init__(self, defaultvalue=None, **kw):
-        defaultvalue = defaultvalue or []
+    def __init__(self, defaultvalue=0, **kw):
+        defaultvalue = [] if defaultvalue == 0 else defaultvalue
 
         super(ListProperty, self).__init__(defaultvalue, **kw)
 
     cpdef link(self, EventDispatcher obj, str name):
         Property.link(self, obj, name)
         cdef PropertyStorage ps = obj.__storage[self._name]
-        ps.value = ObservableList(self, obj, ps.value)
+        if ps.value is not None:
+            ps.value = ObservableList(self, obj, ps.value)
 
     cdef check(self, EventDispatcher obj, value):
         if Property.check(self, obj, value):
@@ -813,10 +834,11 @@ cdef class ListProperty(Property):
                 self.name))
 
     cpdef set(self, EventDispatcher obj, value):
-        value = ObservableList(self, obj, value)
+        if value is not None:
+            value = ObservableList(self, obj, value)
         Property.set(self, obj, value)
 
-cdef inline void observable_dict_dispatch(object self):
+cdef inline void observable_dict_dispatch(object self) except *:
     cdef Property prop = self.prop
     prop.dispatch(self.obj)
 
@@ -886,7 +908,7 @@ cdef class DictProperty(Property):
     '''Property that represents a dict.
 
     :Parameters:
-        `defaultvalue`: dict, defaults to None
+        `defaultvalue`: dict, defaults to {}
             Specifies the default value of the property.
         `rebind`: bool, defaults to False
             See :class:`ObjectProperty` for details.
@@ -900,8 +922,8 @@ cdef class DictProperty(Property):
         :class:`DictProperty`, the dict stored in the property is a shallow copy of the
         dict and not the original dict. See :class:`ListProperty` for details.
     '''
-    def __init__(self, defaultvalue=None, rebind=False, **kw):
-        defaultvalue = defaultvalue or {}
+    def __init__(self, defaultvalue=0, rebind=False, **kw):
+        defaultvalue = {} if defaultvalue == 0 else defaultvalue
 
         super(DictProperty, self).__init__(defaultvalue, **kw)
         self.rebind = rebind
@@ -909,7 +931,8 @@ cdef class DictProperty(Property):
     cpdef link(self, EventDispatcher obj, str name):
         Property.link(self, obj, name)
         cdef PropertyStorage ps = obj.__storage[self._name]
-        ps.value = ObservableDict(self, obj, ps.value)
+        if ps.value is not None:
+            ps.value = ObservableDict(self, obj, ps.value)
 
     cdef check(self, EventDispatcher obj, value):
         if Property.check(self, obj, value):
@@ -920,7 +943,8 @@ cdef class DictProperty(Property):
                 self.name))
 
     cpdef set(self, EventDispatcher obj, value):
-        value = ObservableDict(self, obj, value)
+        if value is not None:
+            value = ObservableDict(self, obj, value)
         Property.set(self, obj, value)
 
 
@@ -1393,14 +1417,21 @@ cdef class AliasProperty(Property):
             self.x = value - self.width
         right = AliasProperty(get_right, set_right, bind=['x', 'width'])
 
-    If `x` were to be an instance level attribute and not Kivy property then
-    you have to return `True` from setter to dispatch value of `right`::
+    If `x` were a non Kivy property then you have to return `True` from setter
+    to dispatch new value of `right`::
 
         def set_right(self, value):
             self.x = value - self.width
             return True
 
-    If your want to cache the value returned by getter then pass `cache=True`.
+    Usually `bind` list should contain all Kivy properties used in getter
+    method. If you return `True` it will cause a dispatch which one should do
+    when the property value has changed, but keep in mind that the property
+    could already have dispatched the changed value if a kivy property the
+    alias property is bound was set in the setter, causing a second dispatch
+    if the setter returns `True`.
+
+    If you want to cache the value returned by getter then pass `cache=True`.
     This way getter will only be called if new value is set or one of the
     binded properties changes. In both cases new value of alias property will
     be cached again.
@@ -1418,11 +1449,11 @@ cdef class AliasProperty(Property):
             alias property won't be called when the property is set (e.g.
             `right = 10`), unless the setter returns `True`.
         `bind`: list/tuple
-            Properties to observe for changes, as property name strings.
+            Properties to observe for changes as property name strings.
             Changing values of this properties will dispatch value of the
             alias property.
         `cache`: boolean
-            If `True`, the value will be cached, until one of the binded
+            If `True`, the value will be cached until one of the binded
             elements changes or if setter returns `True`.
         `rebind`: bool, defaults to `False`
             See :class:`ObjectProperty` for details.

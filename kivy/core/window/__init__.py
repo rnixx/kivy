@@ -22,11 +22,12 @@ from kivy.modules import Modules
 from kivy.event import EventDispatcher
 from kivy.properties import ListProperty, ObjectProperty, AliasProperty, \
     NumericProperty, OptionProperty, StringProperty, BooleanProperty
-from kivy.utils import platform, reify, deprecated
+from kivy.utils import platform, reify, deprecated, pi_version
 from kivy.context import get_current_context
 from kivy.uix.behaviors import FocusBehavior
 from kivy.setupconfig import USE_SDL2
 from kivy.graphics.transformation import Matrix
+from kivy.graphics.cgl import cgl_get_backend_name
 
 # late import
 VKeyboard = None
@@ -131,9 +132,6 @@ class Keyboard(EventDispatcher):
         #: VKeyboard widget, if allowed by the configuration
         self.widget = kwargs.get('widget', None)
 
-    def get_window_info():
-        pass
-
     def on_key_down(self, keycode, text, modifiers):
         pass
 
@@ -149,6 +147,7 @@ class Keyboard(EventDispatcher):
         callback.'''
         if self.window:
             self.window.release_keyboard(self.target)
+            self.target = None
 
     def _on_window_textinput(self, instance, text):
         return self.dispatch('on_textinput', text)
@@ -333,14 +332,25 @@ class WindowBase(EventDispatcher):
     __instance = None
     __initialized = False
     _fake_fullscreen = False
-    _density = 1
 
     # private properties
+    _density = NumericProperty(1)
     _size = ListProperty([0, 0])
     _modifiers = ListProperty([])
     _rotation = NumericProperty(0)
     _clearcolor = ObjectProperty([0, 0, 0, 1])
     _focus = BooleanProperty(True)
+
+    gl_backends_allowed = []
+    """
+    A list of Kivy gl backend names, which if not empty, will be the
+    exclusive list of gl backends that can be used with this window.
+    """
+
+    gl_backends_ignored = []
+    """
+    A list of Kivy gl backend names that may not be used with this window.
+    """
 
     children = ListProperty([])
     '''List of the children of this window.
@@ -372,7 +382,7 @@ class WindowBase(EventDispatcher):
     def _get_modifiers(self):
         return self._modifiers
 
-    modifiers = AliasProperty(_get_modifiers, None)
+    modifiers = AliasProperty(_get_modifiers, None, bind=('_modifiers',))
     '''List of keyboard modifiers currently active.
 
     .. versionadded:: 1.0.9
@@ -398,11 +408,7 @@ class WindowBase(EventDispatcher):
                 self._size = size
             else:
                 self._size = size[1], size[0]
-
             self.dispatch('on_pre_resize', *size)
-            return True
-        else:
-            return False
 
     minimum_width = NumericProperty(0)
     '''The minimum width to restrict the window to.
@@ -432,7 +438,9 @@ class WindowBase(EventDispatcher):
     and defaults to True.
     '''
 
-    size = AliasProperty(_get_size, _set_size, bind=('_size', ))
+    size = AliasProperty(_get_size, _set_size,
+                         bind=('_size', '_rotation', 'softinput_mode',
+                               'keyboard_height'))
     '''Get the rotated size of the window. If :attr:`rotation` is set, then the
     size will change to reflect the rotation.
 
@@ -502,7 +510,9 @@ class WindowBase(EventDispatcher):
             return _size[1] - kb
         return _size[0] - kb
 
-    height = AliasProperty(_get_height, None, bind=('_rotation', '_size'))
+    height = AliasProperty(_get_height, None,
+                           bind=('_rotation', '_size', 'softinput_mode',
+                                 'keyboard_height'))
     '''Rotated window height.
 
     :attr:`height` is a read-only :class:`~kivy.properties.AliasProperty`.
@@ -511,7 +521,9 @@ class WindowBase(EventDispatcher):
     def _get_center(self):
         return self.width / 2., self.height / 2.
 
-    center = AliasProperty(_get_center, None, bind=('width', 'height'))
+    center = AliasProperty(_get_center,
+                           bind=('width', 'height', '_density'),
+                           cache=True)
     '''Center of the rotated window.
 
     .. versionadded:: 1.0.9
@@ -625,8 +637,7 @@ class WindowBase(EventDispatcher):
             return self._get_ios_kheight()
         return 0
 
-    keyboard_height = AliasProperty(_get_kheight, None,
-                                    bind=('_keyboard_changed',), cached=True)
+    keyboard_height = AliasProperty(_get_kheight, bind=('_keyboard_changed',))
     '''Returns the height of the softkeyboard/IME on mobile platforms.
     Will return 0 if not on mobile platform or if IME is not active.
 
@@ -668,10 +679,10 @@ class WindowBase(EventDispatcher):
             return self._size[0], self._size[1] - self.keyboard_height
         return self._size
 
-    system_size = AliasProperty(
-        _get_system_size,
-        _set_system_size,
-        bind=('_size', ))
+    system_size = AliasProperty(_get_system_size, _set_system_size,
+                                bind=('_size', 'softinput_mode',
+                                      'keyboard_height'),
+                                cache=True)
     '''Real size of the window ignoring rotation.
 
     .. versionadded:: 1.0.9
@@ -860,16 +871,15 @@ class WindowBase(EventDispatcher):
     trigger_create_window = None
 
     __events__ = (
-        'on_draw', 'on_flip', 'on_rotate', 'on_resize', 'on_close',
-        'on_minimize', 'on_maximize', 'on_restore', 'on_hide', 'on_show',
-        'on_motion', 'on_touch_down', 'on_touch_move', 'on_touch_up',
-        'on_mouse_down', 'on_mouse_move', 'on_mouse_up', 'on_keyboard',
-        'on_key_down', 'on_key_up', 'on_textinput', 'on_dropfile',
-        'on_request_close', 'on_cursor_enter', 'on_cursor_leave',
-        'on_joy_axis', 'on_joy_hat', 'on_joy_ball',
-        'on_joy_button_down', 'on_joy_button_up', 'on_memorywarning',
-        'on_textedit',
-
+        'on_draw', 'on_flip', 'on_rotate', 'on_resize', 'on_move',
+        'on_close', 'on_minimize', 'on_maximize', 'on_restore',
+        'on_hide', 'on_show', 'on_motion', 'on_touch_down',
+        'on_touch_move', 'on_touch_up', 'on_mouse_down',
+        'on_mouse_move', 'on_mouse_up', 'on_keyboard', 'on_key_down',
+        'on_key_up', 'on_textinput', 'on_dropfile', 'on_request_close',
+        'on_cursor_enter', 'on_cursor_leave', 'on_joy_axis',
+        'on_joy_hat', 'on_joy_ball', 'on_joy_button_down',
+        'on_joy_button_up', 'on_memorywarning', 'on_textedit',
         # internal
         'on_pre_resize')
 
@@ -1000,6 +1010,11 @@ class WindowBase(EventDispatcher):
         EventLoop.set_window(self)
         Modules.register_window(self)
         EventLoop.add_event_listener(self)
+
+    def mainloop(self):
+        '''Called by the EventLoop every frame after it idles.
+        '''
+        pass
 
     @deprecated
     def toggle_fullscreen(self):
@@ -1201,6 +1216,19 @@ class WindowBase(EventDispatcher):
             cutoff=self.shape_cutoff, color_key=value
         )
 
+    def get_gl_backend_name(self):
+        """
+        Returns the gl backend that will or is used with this window.
+        """
+        return cgl_get_backend_name(
+            allowed=self.gl_backends_allowed,
+            ignored=self.gl_backends_ignored)
+
+    def initialize_gl(self):
+        from kivy.core.gl import init_gl
+        init_gl(allowed=self.gl_backends_allowed,
+                ignored=self.gl_backends_ignored)
+
     def create_window(self, *largs):
         '''Will create the main window and configure it.
 
@@ -1228,8 +1256,7 @@ class WindowBase(EventDispatcher):
             self._unbind_create_window()
 
         if not self.initialized:
-            from kivy.core.gl import init_gl
-            init_gl()
+            self.initialize_gl()
 
             # create the render context and canvas, only the first time.
             from kivy.graphics import RenderContext, Canvas
@@ -1430,6 +1457,10 @@ class WindowBase(EventDispatcher):
     def on_resize(self, width, height):
         '''Event called when the window is resized.'''
         self.update_viewport()
+
+    def on_move(self):
+        self.property('top').dispatch(self)
+        self.property('left').dispatch(self)
 
     def update_viewport(self):
         from kivy.graphics.opengl import glViewport
@@ -2030,7 +2061,7 @@ class WindowBase(EventDispatcher):
 
 #: Instance of a :class:`WindowBase` implementation
 window_impl = []
-if platform == 'linux':
+if platform == 'linux' and (pi_version or 4) < 4:
     window_impl += [('egl_rpi', 'window_egl_rpi', 'WindowEglRpi')]
 if USE_SDL2:
     window_impl += [('sdl2', 'window_sdl2', 'WindowSDL')]

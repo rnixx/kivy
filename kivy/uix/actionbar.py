@@ -84,7 +84,9 @@ class ActionItem(object):
     def get_pack_width(self):
         return max(self.minimum_width, self.width)
 
-    pack_width = AliasProperty(get_pack_width, bind=('minimum_width', 'width'))
+    pack_width = AliasProperty(get_pack_width,
+                               bind=('minimum_width', 'width'),
+                               cache=True)
     '''
     (read-only) The actual width to use when packing the items. Equal to the
     greater of minimum_width and width.
@@ -770,7 +772,7 @@ class ActionBar(BoxLayout):
     '''
     ActionBar class, which acts as the main container for an
     :class:`ActionView` instance. The ActionBar determines the overall
-    styling aspects of the bar. :class:`ActionItem`\s are not added to
+    styling aspects of the bar. :class:`ActionItem`\\s are not added to
     this class directly, but to the contained :class:`ActionView` instance.
 
     :Events:
