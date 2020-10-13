@@ -6,6 +6,7 @@ env:
   GST_REGISTRY: '~/registry.bin'
   KIVY_GL_BACKEND: 'angle_sdl2'
   KIVY_SPLIT_EXAMPLES: 1
+  SETUPTOOLS_USE_DISTUTILS: local
 
 jobs:
   unit_test:
@@ -15,9 +16,9 @@ jobs:
         python: [ '3.6', '3.7', '3.8' ]
         arch: ['x64', 'x86']
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v2
     - name: Set up Python
-      uses: actions/setup-python@v1
+      uses: actions/setup-python@v2
       with:
         python-version: ${{ matrix.python }}
         architecture: ${{ matrix.arch }}

@@ -40,20 +40,24 @@ class ExceptionHandler(object):
 
         class E(ExceptionHandler):
             def handle_exception(self, inst):
-                Logger.exception('Exception catched by ExceptionHandler')
+                Logger.exception('Exception caught by ExceptionHandler')
                 return ExceptionManager.PASS
 
         ExceptionManager.add_handler(E())
 
-    All exceptions will be set to PASS, and logged to the console!
+    Then, all exceptions will be set to PASS, and logged to the console!
     '''
 
-    def __init__(self):
-        pass
-
     def handle_exception(self, exception):
-        '''Handle one exception, defaults to returning
-        `ExceptionManager.RAISE`.
+        '''Called by :class:`ExceptionManagerBase` to handle a exception.
+
+        Defaults to returning :attr:`ExceptionManager.RAISE` that re-raises the
+        exception. Return :attr:`ExceptionManager.PASS` to indicate that the
+        exception was handled and should be ignored.
+
+        This may be called multiple times with the same exception, if
+        :attr:`ExceptionManager.RAISE` is returned as the exception bubbles
+        through multiple kivy exception handling levels.
         '''
         return ExceptionManager.RAISE
 
@@ -62,7 +66,11 @@ class ExceptionManagerBase:
     '''ExceptionManager manages exceptions handlers.'''
 
     RAISE = 0
+    """The exception should be re-raised.
+    """
     PASS = 1
+    """The exception should be ignored as it was handled by the handler.
+    """
 
     def __init__(self):
         self.handlers = []
@@ -74,7 +82,7 @@ class ExceptionManagerBase:
             self.handlers.append(cls)
 
     def remove_handler(self, cls):
-        '''Remove a exception handler from the stack.'''
+        '''Remove the exception handler from the stack.'''
         if cls in self.handlers:
             self.handlers.remove(cls)
 
@@ -90,7 +98,10 @@ class ExceptionManagerBase:
 
 
 #: Instance of a :class:`ExceptionManagerBase` implementation.
-ExceptionManager = register_context('ExceptionManager', ExceptionManagerBase)
+ExceptionManager: ExceptionManagerBase = register_context(
+    'ExceptionManager', ExceptionManagerBase)
+"""The :class:`ExceptionManagerBase` instance that handles kivy exceptions.
+"""
 
 
 class EventLoopBase(EventDispatcher):
@@ -163,6 +174,7 @@ class EventLoopBase(EventDispatcher):
         This starts all configured input providers.'''
         self.status = 'started'
         self.quit = False
+        Clock.start_clock()
         for provider in self.input_providers:
             provider.start()
         self.dispatch('on_start')
@@ -191,6 +203,7 @@ class EventLoopBase(EventDispatcher):
         # ensure any restart will not break anything later.
         self.input_events = []
 
+        Clock.stop_clock()
         self.stopping = False
         self.status = 'stopped'
         self.dispatch('on_stop')
@@ -344,7 +357,6 @@ class EventLoopBase(EventDispatcher):
                     pass
 
     async def async_mainloop(self):
-        from kivy.base import ExceptionManager, stopTouchApp
         while not self.quit and self.status == 'started':
             try:
                 await self.async_idle()
@@ -375,21 +387,26 @@ class EventLoopBase(EventDispatcher):
         Clock.tick()
 
         # read and dispatch input from providers
-        self.dispatch_input()
+        if not self.quit:
+            self.dispatch_input()
 
         # flush all the canvas operation
-        Builder.sync()
+        if not self.quit:
+            Builder.sync()
 
         # tick before draw
-        Clock.tick_draw()
+        if not self.quit:
+            Clock.tick_draw()
 
         # flush all the canvas operation
-        Builder.sync()
+        if not self.quit:
+            Builder.sync()
 
-        window = self.window
-        if window and window.canvas.needs_redraw:
-            window.dispatch('on_draw')
-            window.dispatch('on_flip')
+        if not self.quit:
+            window = self.window
+            if window and window.canvas.needs_redraw:
+                window.dispatch('on_draw')
+                window.dispatch('on_flip')
 
         # don't loop if we don't have listeners !
         if len(self.event_listeners) == 0:
@@ -409,21 +426,26 @@ class EventLoopBase(EventDispatcher):
         await Clock.async_tick()
 
         # read and dispatch input from providers
-        self.dispatch_input()
+        if not self.quit:
+            self.dispatch_input()
 
         # flush all the canvas operation
-        Builder.sync()
+        if not self.quit:
+            Builder.sync()
 
         # tick before draw
-        Clock.tick_draw()
+        if not self.quit:
+            Clock.tick_draw()
 
         # flush all the canvas operation
-        Builder.sync()
+        if not self.quit:
+            Builder.sync()
 
-        window = self.window
-        if window and window.canvas.needs_redraw:
-            window.dispatch('on_draw')
-            window.dispatch('on_flip')
+        if not self.quit:
+            window = self.window
+            if window and window.canvas.needs_redraw:
+                window.dispatch('on_draw')
+                window.dispatch('on_flip')
 
         # don't loop if we don't have listeners !
         if len(self.event_listeners) == 0:
@@ -466,10 +488,10 @@ class EventLoopBase(EventDispatcher):
 EventLoop = EventLoopBase()
 
 
-def _runTouchApp_prepare(widget=None, slave=False):
+def _runTouchApp_prepare(widget=None):
     from kivy.input import MotionEventFactory, kivy_postproc_modules
 
-    # Ok, we got one widget, and we are not in slave mode
+    # Ok, we got one widget, and we are not in embedded mode
     # so, user don't create the window, let's create it for him !
     if widget:
         EventLoop.ensure_window()
@@ -510,7 +532,7 @@ def _runTouchApp_prepare(widget=None, slave=False):
     if platform == 'android':
         Clock.schedule_once(EventLoop.remove_android_splash)
 
-    # in non-slave mode, they are 2 issues
+    # in non-embedded mode, there are 2 issues
     #
     # 1. if user created a window, call the mainloop from window.
     #    This is due to glut, it need to be called with
@@ -523,7 +545,7 @@ def _runTouchApp_prepare(widget=None, slave=False):
     #
 
 
-def runTouchApp(widget=None, slave=False):
+def runTouchApp(widget=None, embedded=False):
     '''Static main function that starts the application loop.
     You can access some magic via the following arguments:
 
@@ -540,20 +562,20 @@ def runTouchApp(widget=None, slave=False):
             and your widget will be added to the window as the root
             widget.
 
-        `slave`
+        `embedded`
             No event dispatching is done. This will be your job.
 
-        `widget + slave`
+        `widget + embedded`
             No event dispatching is done. This will be your job but
             we try to get the window (must be created by you beforehand)
             and add the widget to it. Very useful for embedding Kivy
             in another toolkit. (like Qt, check kivy-designed)
 
     '''
-    _runTouchApp_prepare(widget=widget, slave=slave)
+    _runTouchApp_prepare(widget=widget)
 
-    # we are in a slave mode, don't do dispatching.
-    if slave:
+    # we are in embedded mode, don't do dispatching.
+    if embedded:
         return
 
     try:
@@ -562,7 +584,7 @@ def runTouchApp(widget=None, slave=False):
         stopTouchApp()
 
 
-async def async_runTouchApp(widget=None, slave=False, async_lib=None):
+async def async_runTouchApp(widget=None, embedded=False, async_lib=None):
     '''Identical to :func:`runTouchApp` but instead it is a coroutine
     that can be run in an existing async event loop.
 
@@ -573,10 +595,10 @@ async def async_runTouchApp(widget=None, slave=False, async_lib=None):
     '''
     if async_lib is not None:
         Clock.init_async_lib(async_lib)
-    _runTouchApp_prepare(widget=widget, slave=slave)
+    _runTouchApp_prepare(widget=widget)
 
-    # we are in a slave mode, don't do dispatching.
-    if slave:
+    # we are in embedded mode, don't do dispatching.
+    if embedded:
         return
 
     try:

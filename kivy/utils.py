@@ -120,7 +120,7 @@ def get_color_from_hex(s):
     value = [int(x, 16) / 255.
              for x in split('([0-9a-f]{2})', s.lower()) if x != '']
     if len(value) == 3:
-        value.append(1)
+        value.append(1.0)
     return value
 
 
@@ -424,15 +424,17 @@ def format_bytes_to_human(size, precision=2):
 
 def _get_platform():
     # On Android sys.platform returns 'linux2', so prefer to check the
-    # existence of system specific commands and files
-    if (
-            path.exists('/default.prop')
-            and path.exists('/system/bin/logcat')
-            and path.exists('/system/xbin')
-    ):
+    # existence of environ variables set during Python initialization
+    kivy_build = environ.get('KIVY_BUILD', '')
+    if kivy_build in {'android', 'ios'}:
+        return kivy_build
+    elif 'P4A_BOOTSTRAP' in environ:
         return 'android'
-    elif environ.get('KIVY_BUILD', '') == 'ios':
-        return 'ios'
+    elif 'ANDROID_ARGUMENT' in environ:
+        # We used to use this method to detect android platform,
+        # leaving it here to be backwards compatible with `pydroid3`
+        # and similar tools outside kivy's ecosystem
+        return 'android'
     elif _sys_platform in ('win32', 'cygwin'):
         return 'win'
     elif _sys_platform == 'darwin':

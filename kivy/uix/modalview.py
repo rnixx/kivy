@@ -78,7 +78,7 @@ from kivy.logger import Logger
 from kivy.animation import Animation
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.properties import StringProperty, BooleanProperty, ObjectProperty, \
-    NumericProperty, ListProperty
+    NumericProperty, ListProperty, ColorProperty
 
 
 class ModalView(AnchorLayout):
@@ -121,7 +121,7 @@ class ModalView(AnchorLayout):
     defaults to None.
     '''
 
-    background_color = ListProperty([1, 1, 1, 1])
+    background_color = ColorProperty([1, 1, 1, 1])
     '''Background color, in the format (r, g, b, a).
 
     This acts as a *multiplier* to the texture colour. The default
@@ -130,12 +130,13 @@ class ModalView(AnchorLayout):
     :attr:`background_normal` to ``''``.
 
     The :attr:`background_color` is a
-    :class:`~kivy.properties.ListProperty` and defaults to [1, 1, 1, 1].
+    :class:`~kivy.properties.ColorProperty` and defaults to [1, 1, 1, 1].
 
     .. versionchanged:: 2.0.0
         Changed behavior to affect the background of the widget itself, not
         the overlay dimming.
-
+        Changed from :class:`~kivy.properties.ListProperty` to
+        :class:`~kivy.properties.ColorProperty`.
     '''
 
     background = StringProperty(
@@ -159,11 +160,11 @@ class ModalView(AnchorLayout):
     (16, 16, 16, 16).
     '''
 
-    overlay_color = ListProperty([0, 0, 0, .7])
+    overlay_color = ColorProperty([0, 0, 0, .7])
     '''Overlay color in the format (r, g, b, a).
     Used for dimming the window behind the modal view.
 
-    :attr:`overlay_color` is a :class:`~kivy.properties.ListProperty` and
+    :attr:`overlay_color` is a :class:`~kivy.properties.ColorProperty` and
     defaults to [0, 0, 0, .7].
 
     .. versionadded:: 2.0.0
@@ -276,10 +277,12 @@ class ModalView(AnchorLayout):
         return True
 
     def on_touch_up(self, touch):
-        if self.auto_dismiss and not self._touch_started_inside:
+        # Explicitly test for False as None occurs when shown by on_touch_down
+        if self.auto_dismiss and self._touch_started_inside is False:
             self.dismiss()
-            return True
-        super(ModalView, self).on_touch_up(touch)
+        else:
+            super(ModalView, self).on_touch_up(touch)
+        self._touch_started_inside = None
         return True
 
     def on__anim_alpha(self, instance, value):
