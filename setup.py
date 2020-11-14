@@ -600,21 +600,24 @@ def determine_base_flags():
             environ.get('LOCALBASE', '/usr/local'), 'include')]
         flags['library_dirs'] += [join(
             environ.get('LOCALBASE', '/usr/local'), 'lib')]
-    elif platform == 'darwin':
+    elif platform == 'darwin' and c_options['use_osx_frameworks']:
         v = os.uname()
         if v[2] >= '13.0.0':
-            # use xcode-select to search on the right Xcode path
-            # XXX use the best SDK available instead of a specific one
-            import platform as _platform
-            xcode_dev = getoutput('xcode-select -p').splitlines()[0]
-            sdk_mac_ver = '.'.join(_platform.mac_ver()[0].split('.')[:2])
-            print('Xcode detected at {}, and using OS X{} sdk'.format(
-                xcode_dev, sdk_mac_ver))
-            sysroot = join(
-                xcode_dev.decode('utf-8'),
-                'Platforms/MacOSX.platform/Developer/SDKs',
-                'MacOSX{}.sdk'.format(sdk_mac_ver),
-                'System/Library/Frameworks')
+            if 'SDKROOT' in environ:
+                sysroot = join(environ['SDKROOT'], 'System/Library/Frameworks')
+            else:
+                # use xcode-select to search on the right Xcode path
+                # XXX use the best SDK available instead of a specific one
+                import platform as _platform
+                xcode_dev = getoutput('xcode-select -p').splitlines()[0]
+                sdk_mac_ver = '.'.join(_platform.mac_ver()[0].split('.')[:2])
+                print('Xcode detected at {}, and using OS X{} sdk'.format(
+                    xcode_dev, sdk_mac_ver))
+                sysroot = join(
+                    xcode_dev.decode('utf-8'),
+                    'Platforms/MacOSX.platform/Developer/SDKs',
+                    'MacOSX{}.sdk'.format(sdk_mac_ver),
+                    'System/Library/Frameworks')
         else:
             sysroot = ('/System/Library/Frameworks/'
                        'ApplicationServices.framework/Frameworks')
@@ -1107,9 +1110,10 @@ if not build_examples:
             'Operating System :: Microsoft :: Windows',
             'Operating System :: POSIX :: BSD :: FreeBSD',
             'Operating System :: POSIX :: Linux',
-            'Programming Language :: Python :: 3.5',
             'Programming Language :: Python :: 3.6',
             'Programming Language :: Python :: 3.7',
+            'Programming Language :: Python :: 3.8',
+            'Programming Language :: Python :: 3.9',
             'Topic :: Artistic Software',
             'Topic :: Games/Entertainment',
             'Topic :: Multimedia :: Graphics :: 3D Rendering',
