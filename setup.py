@@ -103,12 +103,9 @@ build_examples = build_examples or \
 
 platform = sys.platform
 
-# Detect 32/64bit for OSX (http://stackoverflow.com/a/1405971/798575)
 if sys.platform == 'darwin':
-    if sys.maxsize > 2 ** 32:
-        osx_arch = 'x86_64'
-    else:
-        osx_arch = 'i386'
+    from platform import machine
+    osx_arch = machine()
 
 
 # Detect Python for android project (http://github.com/kivy/python-for-android)
@@ -427,8 +424,8 @@ elif platform == 'darwin':
         if osx_arch == "i386":
             print("Warning: building with frameworks fail on i386")
         else:
-            print("OSX framework used, force to x86_64 only")
-            environ["ARCHFLAGS"] = environ.get("ARCHFLAGS", "-arch x86_64")
+            print(f"OSX framework used, force to {osx_arch} only")
+            environ["ARCHFLAGS"] = environ.get("ARCHFLAGS", f"-arch {osx_arch}")
             print("OSX ARCHFLAGS are: {}".format(environ["ARCHFLAGS"]))
 
 # detect gstreamer, only on desktop
@@ -533,18 +530,6 @@ if c_options['use_sdl2'] or (
 
 # -----------------------------------------------------------------------------
 # declare flags
-
-
-def get_modulename_from_file(filename):
-    filename = filename.replace(sep, '/')
-    pyx = '.'.join(filename.split('.')[:-1])
-    pyxl = pyx.split('/')
-    while pyxl[0] != 'kivy':
-        pyxl.pop(0)
-    if pyxl[1] == 'kivy':
-        pyxl.pop(0)
-    return '.'.join(pyxl)
-
 
 def expand(root, *args):
     return join(root, 'kivy', *args)
@@ -827,7 +812,9 @@ sources = {
     '_event.pyx': merge(base_flags, {'depends': ['properties.pxd']}),
     '_clock.pyx': {},
     'weakproxy.pyx': {},
-    'properties.pyx': merge(base_flags, {'depends': ['_event.pxd']}),
+    'properties.pyx': merge(
+        base_flags, {'depends': ['_event.pxd', '_metrics.pxd']}),
+    '_metrics.pyx': merge(base_flags, {'depends': ['_event.pxd']}),
     'graphics/buffer.pyx': merge(base_flags, gl_flags_base),
     'graphics/context.pyx': merge(base_flags, gl_flags_base),
     'graphics/compiler.pyx': merge(base_flags, gl_flags_base),
@@ -999,23 +986,23 @@ def get_extensions_from_sources(sources):
         return ext_modules
     for pyx, flags in sources.items():
         is_graphics = pyx.startswith('graphics')
-        pyx = expand(src_path, pyx)
+        pyx_path = expand(src_path, pyx)
         depends = [expand(src_path, x) for x in flags.pop('depends', [])]
         c_depends = [expand(src_path, x) for x in flags.pop('c_depends', [])]
         if not can_use_cython:
             # can't use cython, so use the .c files instead.
-            pyx = '%s.c' % pyx[:-4]
+            pyx_path = '%s.c' % pyx_path[:-4]
         if is_graphics:
-            depends = resolve_dependencies(pyx, depends)
+            depends = resolve_dependencies(pyx_path, depends)
         f_depends = [x for x in depends if x.rsplit('.', 1)[-1] in (
             'c', 'cpp', 'm')]
-        module_name = get_modulename_from_file(pyx)
+        module_name = '.'.join(['kivy'] + pyx[:-4].split('/'))
         flags_clean = {'depends': depends}
         for key, value in flags.items():
             if len(value):
                 flags_clean[key] = value
         ext_modules.append(CythonExtension(
-            module_name, [pyx] + f_depends + c_depends, **flags_clean))
+            module_name, [pyx_path] + f_depends + c_depends, **flags_clean))
     return ext_modules
 
 

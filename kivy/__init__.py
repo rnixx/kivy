@@ -351,10 +351,10 @@ if not environ.get('KIVY_DOC_INCLUDE'):
     level = LOG_LEVELS.get(Config.get('kivy', 'log_level'))
     Logger.setLevel(level=level)
 
-    # Can be overrided in command line
+    # Can be overriden in command line
     if ('KIVY_UNITTEST' not in environ and
             'KIVY_PACKAGING' not in environ and
-            'KIVY_NO_ARGS' not in environ):
+            environ.get('KIVY_NO_ARGS', "false") not in ('true', '1', 'yes')):
         # save sys argv, otherwise, gstreamer use it and display help..
         sys_argv = sys.argv
         sys.argv = sys.argv[:1]
@@ -476,11 +476,11 @@ if not environ.get('KIVY_DOC_INCLUDE'):
 for msg in _logging_msgs:
     Logger.info(msg)
 
-if _KIVY_RELEASE:
-    Logger.info('Kivy: v%s' % __version__)
-elif not _KIVY_RELEASE and _kivy_git_hash and _kivy_build_date:
+if not _KIVY_RELEASE and _kivy_git_hash and _kivy_build_date:
     Logger.info('Kivy: v%s, git-%s, %s' % (
         __version__, _kivy_git_hash[:7], _kivy_build_date))
+else:
+    Logger.info('Kivy: v%s' % __version__)
 Logger.info('Kivy: Installed at "{}"'.format(__file__))
 Logger.info('Python: v{}'.format(sys.version))
 Logger.info('Python: Interpreter at "{}"'.format(sys.executable))

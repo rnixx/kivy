@@ -77,11 +77,7 @@ function Install-kivy-test-run-pip-deps {
 }
 
 function Install-kivy {
-    $old=(pwd).Path
-    cmd /c mklink /d "$HOME\kivy" "$old"
-    cd "$HOME\kivy"
     python -m pip install -e .[dev,full]
-    cd "$old"
 }
 
 function Install-kivy-wheel {
@@ -116,6 +112,10 @@ function Install-kivy-sdist {
 
 function Test-kivy {
     python -m pytest --timeout=300 --cov=kivy --cov-report term --cov-branch "$(pwd)/kivy/tests"
+}
+
+function Test-kivy-benchmark {
+    python -m pytest "$(pwd)/kivy/tests" --benchmark-only
 }
 
 function Test-kivy-installed {
