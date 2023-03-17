@@ -259,9 +259,19 @@ cdef class _WindowSDL2Storage:
         SDL_SetEventFilter(_event_filter, <void *>self)
 
         SDL_EventState(SDL_DROPFILE, SDL_ENABLE)
+        SDL_EventState(SDL_DROPTEXT, SDL_ENABLE)
+        SDL_EventState(SDL_DROPBEGIN, SDL_ENABLE)
+        SDL_EventState(SDL_DROPCOMPLETE, SDL_ENABLE)
         cdef int w, h
         SDL_GetWindowSize(self.win, &w, &h)
         return w, h
+
+
+    def _get_display_dpi(self):
+        cdef int display_index = SDL_GetWindowDisplayIndex(self.win)
+        cdef float horizontal_dpi = 0.
+        SDL_GetDisplayDPI(display_index, NULL, &horizontal_dpi, NULL)
+        return horizontal_dpi
 
     def _set_cursor_state(self, value):
         SDL_ShowCursor(value)
@@ -336,6 +346,9 @@ cdef class _WindowSDL2Storage:
     def set_minimum_size(self, w, h):
         SDL_SetWindowMinimumSize(self.win, w, h)
 
+    def set_always_on_top(self, always_on_top):
+        SDL_SetWindowAlwaysOnTop(self.win, SDL_TRUE if always_on_top else SDL_FALSE)
+
     def set_allow_screensaver(self, allow_screensaver):
         if allow_screensaver:
             SDL_EnableScreenSaver()
@@ -367,8 +380,8 @@ cdef class _WindowSDL2Storage:
             mode = SDL_WINDOW_FULLSCREEN
         else:
             mode = False
-        IF not USE_IOS:
-            SDL_SetWindowFullscreen(self.win, mode)
+
+        SDL_SetWindowFullscreen(self.win, mode)
 
     def set_window_title(self, title):
         SDL_SetWindowTitle(self.win, <bytes>title.encode('utf-8'))
@@ -554,6 +567,7 @@ cdef class _WindowSDL2Storage:
                 TYPE_CLASS_NUMBER = 2
                 TYPE_CLASS_PHONE = 3
                 TYPE_CLASS_TEXT = 1
+                TYPE_CLASS_NULL = 0
 
                 TYPE_TEXT_VARIATION_EMAIL_ADDRESS = 32
                 TYPE_TEXT_VARIATION_URI = 16
@@ -562,6 +576,7 @@ cdef class _WindowSDL2Storage:
                 TYPE_TEXT_FLAG_NO_SUGGESTIONS = 524288
 
                 input_type_value = {
+                                "null": TYPE_CLASS_NULL,
                                 "text": TYPE_CLASS_TEXT,
                                 "number": TYPE_CLASS_NUMBER,
                                 "url":
@@ -580,6 +595,10 @@ cdef class _WindowSDL2Storage:
                 text_keyboards = {"text", "url", "mail", "address"}
 
                 if not keyboard_suggestions and input_type in text_keyboards:
+                    """
+                    Looks like some (major) device vendors and keyboards are de-facto ignoring this flag,
+                    so we can't really rely on this one to disable suggestions.
+                    """
                     input_type_value |= TYPE_TEXT_FLAG_NO_SUGGESTIONS
 
                 mActivity.changeKeyboard(input_type_value)
@@ -606,12 +625,9 @@ cdef class _WindowSDL2Storage:
             rv = SDL_PollEvent(&event)
         if rv == 0:
             return False
-
         action = None
         if event.type == SDL_QUIT:
             return ('quit', )
-        elif event.type == SDL_DROPFILE:
-            return ('dropfile', event.drop.file)
         elif event.type == SDL_MOUSEMOTION:
             x = event.motion.x
             y = event.motion.y
@@ -711,6 +727,11 @@ cdef class _WindowSDL2Storage:
                     'windowmoved',
                     event.window.data1, event.window.data2
                 )
+            elif event.window.event == SDL_WINDOWEVENT_DISPLAY_CHANGED:
+                action = (
+                    'windowdisplaychanged',
+                    event.window.data1, event.window.data2
+                )
             else:
                 #    print('receive unknown sdl window event', event.type)
                 pass
@@ -727,12 +748,26 @@ cdef class _WindowSDL2Storage:
         elif event.type == SDL_TEXTEDITING:
             s = event.edit.text.decode('utf-8')
             return ('textedit', s)
+        elif event.type == SDL_DROPFILE:
+            return ('dropfile', event.drop.file)
+        elif event.type == SDL_DROPTEXT:
+            return ('droptext', event.drop.file)
+        elif event.type == SDL_DROPBEGIN:
+            return ('dropbegin',)
+        elif event.type == SDL_DROPCOMPLETE:
+            return ('dropend',)
         else:
             #    print('receive unknown sdl window event', event.type)
             pass
 
     def flip(self):
-        SDL_GL_SwapWindow(self.win)
+        # On Android (and potentially other platforms), SDL_GL_SwapWindow may
+        # lock the thread waiting for a mutex from another thread to be
+        # released. Calling SDL_GL_SwapWindow with the GIL released allow the
+        # other thread to run (e.g. to process the event filter callback) and
+        # release the mutex SDL_GL_SwapWindow is waiting for.
+        with nogil:
+            SDL_GL_SwapWindow(self.win)
 
     def save_bytes_in_png(self, filename, data, int width, int height):
         cdef SDL_Surface *surface = SDL_CreateRGBSurfaceFrom(
@@ -750,6 +785,11 @@ cdef class _WindowSDL2Storage:
     def grab_mouse(self, grab):
         SDL_SetWindowGrab(self.win, SDL_TRUE if grab else SDL_FALSE)
 
+    def get_relative_mouse_pos(self):
+        cdef int x, y
+        SDL_GetGlobalMouseState(&x, &y)
+        wx, wy = self.get_window_pos()
+        return x - wx, y - wy
 
     def set_custom_titlebar(self, titlebar_widget):
         SDL_SetWindowBordered(self.win, SDL_FALSE)

@@ -242,6 +242,13 @@ class FocusBehavior(object):
     This will only work if :attr:`input_type` is set to `text`, `url`, `mail` or
     `address`.
 
+    .. warning::
+        On Android, `keyboard_suggestions` relies on
+        `InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS` to work, but some keyboards
+        just ignore this flag. If you want to disable suggestions at all on
+        Android, you can set `input_type` to `null`, which will request the
+        input method to run in a limited "generate key events" mode.
+
     .. versionadded:: 2.1.0
 
     :attr:`keyboard_suggestions` is a :class:`~kivy.properties.BooleanProperty`
@@ -344,15 +351,22 @@ class FocusBehavior(object):
     defaults to 'auto'. Can be one of 'auto' or 'managed'.
     '''
 
-    input_type = OptionProperty('text', options=('text', 'number', 'url',
-                                                 'mail', 'datetime', 'tel',
-                                                 'address'))
+    input_type = OptionProperty('null', options=('null', 'text', 'number',
+                                                 'url', 'mail', 'datetime',
+                                                 'tel', 'address'))
     '''The kind of input keyboard to request.
 
     .. versionadded:: 1.8.0
 
+    .. versionchanged:: 2.1.0
+        Changed default value from `text` to `null`. Added `null` to options.
+
+        .. warning::
+            As the default value has been changed, you may need to adjust
+            `input_type` in your code.
+
     :attr:`input_type` is an :class:`~kivy.properties.OptionsProperty` and
-    defaults to 'text'. Can be one of 'text', 'number', 'url', 'mail',
+    defaults to 'null'. Can be one of 'null', 'text', 'number', 'url', 'mail',
     'datetime', 'tel' or 'address'.
     '''
 

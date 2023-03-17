@@ -224,5 +224,21 @@ $(function() {
 		var section_title = $('li.toctree-l1.current > a').text();
 		$('div.body h1:eq(0)').prepend(section_title + ' &raquo; ');
 	}
+	// Hack to add an attrib to all linenos,
+	// this is needed in order to avoid certain browsers (Ex: Safari) that treat the line-number as a copyable item.
+    $(".linenos, .gp").each(function(){
+        let $this = $(this);
+        $this.attr("unselectable-data", $this.text());
+		$this.contents().filter(function(){
+    			return this.nodeType === 3; //https://developer.mozilla.org/en-US/docs/Web/API/Node/nodeType
+		}).remove();
+  });
 
+
+	$("#themeToggleSwitch").click(function () {
+		let currTheme = document.documentElement.className,
+			newTheme = currTheme === "light" ? "dark" : "light"
+		document.documentElement.className = newTheme
+		localStorage.setItem('theme', newTheme);
+	});
 });
