@@ -45,7 +45,7 @@ to the examples as ``examples-path``. The touchtracer example is in
    ``python`` works).
 #. Create a folder into which the packaged app will be created. For example
    create a ``TouchApp`` folder and `change to that directory
-   <http://www.computerhope.com/cdhlp.htm>`_ with e.g. ``cd TouchApp``.
+   <https://www.computerhope.com/cdhlp.htm>`_ with e.g. ``cd TouchApp``.
    Then type::
 
     python -m PyInstaller --name touchtracer examples-path\demo\touchtracer\main.py
@@ -53,7 +53,7 @@ to the examples as ``examples-path``. The touchtracer example is in
    You can also add an `icon.ico` file to the application folder in order to
    create an icon for the executable. If you don't have a .ico file available,
    you can convert your `icon.png` file to ico using the web app
-   `ConvertICO <http://www.convertico.com>`_. Save the `icon.ico` in the
+   `ConvertICO <https://www.convertico.com>`_. Save the `icon.ico` in the
    touchtracer directory and type::
 
     python -m PyInstaller --name touchtracer --icon examples-path\demo\touchtracer\icon.ico examples-path\demo\touchtracer\main.py
@@ -174,21 +174,6 @@ Then build the spec file in ``VideoPlayer`` with::
 
 and you should find gstvideo.exe in ``VideoPlayer\dist\gstvideo``,
 which when run will play a video.
-
-.. note::
-
-    If you're using Pygame and need PyGame in your packaging app, you'll have
-    to add the following code to your spec file due to kivy issue #1638. After
-    the imports add the following::
-
-        def getResource(identifier, *args, **kwargs):
-            if identifier == 'pygame_icon.tiff':
-                raise IOError()
-            return _original_getResource(identifier, *args, **kwargs)
-
-        import pygame.pkgdata
-        _original_getResource = pygame.pkgdata.getResource
-        pygame.pkgdata.getResource = getResource
 
 .. _overwrite-win-hook:
 

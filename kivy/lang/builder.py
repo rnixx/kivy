@@ -12,8 +12,13 @@ from types import CodeType
 from functools import partial
 
 from kivy.factory import Factory
-from kivy.lang.parser import Parser, ParserException, _handlers, global_idmap,\
-    ParserRuleProperty
+from kivy.lang.parser import (
+    Parser,
+    ParserException,
+    _handlers,
+    global_idmap,
+    ParserRuleProperty,
+)
 from kivy.logger import Logger
 from kivy.utils import QueryDict
 from kivy.cache import Cache
@@ -806,7 +811,7 @@ class BuilderBase(object):
         This effectively clears all the KV rules associated with this widget.
         For example:
 
-        .. code-block:: python
+        .. code-block:: python-console
 
             >>> w = Builder.load_string(\'''
             ... Widget:
@@ -854,7 +859,7 @@ class BuilderBase(object):
 
         For example:
 
-        .. code-block:: python
+        .. code-block:: python-console
 
             >>> w = Builder.load_string(\'''
             ... Widget:

@@ -257,6 +257,7 @@ cdef extern from "SDL.h":
         SDL_WINDOW_FULLSCREEN_DESKTOP
         SDL_WINDOW_ALLOW_HIGHDPI
         SDL_WINDOW_SKIP_TASKBAR = 0x00010000    #,   /**< window should not be added to the taskbar */
+        SDL_WINDOW_METAL = 0x20000000           #,          /**< window usable for Metal view */
 
     ctypedef enum SDL_HitTestResult:
         SDL_HITTEST_NORMAL
@@ -430,6 +431,7 @@ cdef extern from "SDL.h":
     ctypedef struct SDL_Texture
     ctypedef struct SDL_Renderer
     ctypedef struct SDL_Window
+    ctypedef struct SDL_MetalView
     ctypedef struct SDL_DisplayMode:
         Uint32 format
         int w
@@ -469,7 +471,7 @@ cdef extern from "SDL.h":
     ctypedef enum SDL_Scancode:
         pass
 
-    ctypedef int SDL_EventFilter(void* userdata, SDL_Event* event)
+    ctypedef int (*SDL_EventFilter)(void* userdata, SDL_Event* event)
     # for windows only see
     # https://github.com/LuaDist/sdl/blob/master/include/begin_code.h#L68
     IF UNAME_SYSNAME == 'Windows':
@@ -535,7 +537,7 @@ cdef extern from "SDL.h":
     cdef void SDL_Delay(Uint32 ms) nogil
     cdef Uint8 SDL_EventState(Uint32 type, int state)
     cdef int SDL_PollEvent(SDL_Event * event) nogil
-    cdef void SDL_SetEventFilter(SDL_EventFilter *filter, void* userdata)
+    cdef void SDL_SetEventFilter(SDL_EventFilter filter, void* userdata)
     cdef SDL_RWops * SDL_RWFromFile(char *file, char *mode)
     cdef SDL_RWops * SDL_RWFromMem(void *mem, int size)
     cdef SDL_RWops * SDL_RWFromConstMem(void *mem, int size)
@@ -656,8 +658,12 @@ cdef extern from "SDL.h":
     cdef void SDL_SetTextInputRect(SDL_Rect *rect)
     cdef SDL_bool SDL_HasScreenKeyboardSupport()
     cdef SDL_bool SDL_IsScreenKeyboardShown(SDL_Window *window)
-    cdef void SDL_GL_GetDrawableSize(SDL_Window *window, int *w, int *h)
+    cdef void SDL_GetWindowSizeInPixels(SDL_Window *window, int *w, int *h)
     cdef int SDL_SetWindowHitTest(SDL_Window *window, SDL_HitTest callback, void *callback_data)
+    cdef SDL_MetalView SDL_Metal_CreateView(SDL_Window * window)
+    cdef void* SDL_Metal_GetLayer(SDL_MetalView view)
+
+
     # Sound audio formats
     Uint16 AUDIO_U8     #0x0008  /**< Unsigned 8-bit samples */
     Uint16 AUDIO_S8     #0x8008  /**< Signed 8-bit samples */
@@ -923,6 +929,10 @@ cdef extern from "SDL_audio.h":
         int dst_rate
     )
     cdef int SDL_ConvertAudio(SDL_AudioCVT *cvt)
+
+cdef extern from "SDL_video.h":
+    cdef int SDL_SetWindowOpacity(SDL_Window *window, float opacity)
+    cdef int SDL_GetWindowOpacity(SDL_Window *window, float *opacity)
 
 cdef extern from "SDL_mixer.h":
     cdef struct Mix_Chunk:

@@ -297,7 +297,7 @@ well be executed in the order they were scheduled.
 Also, all the scheduling and canceling methods are fully thread safe and
 can be safely used from external threads.
 
-As a a consequence, calling :meth:`CyClockBase.unschedule` with the original
+As a consequence, calling :meth:`CyClockBase.unschedule` with the original
 callback is now significantly slower and highly discouraged. Instead, the
 returned events should be used to cancel. As a tradeoff, all the other methods
 are now significantly faster than before.
@@ -356,7 +356,7 @@ This clock, and all the clocks described after this have an option,
 :attr:`ClockBaseInterruptBehavior.interupt_next_only`. When True, any of the
 behavior new behavior will only apply to the callbacks with a timeout of
 zero. Non-zero timeouts will behave like in the default clock. E.g. for this
-clock when True, only zero timeouts will execute during the the interval.
+clock when True, only zero timeouts will execute during the interval.
 
 In a test using a fps of 30, a callback with a timeout of 0, 0.001, and 0.05,
 resulted in a mean callback delay of 0.00013, 0.00013, and 0.04120 seconds,
@@ -460,7 +460,7 @@ from functools import wraps, partial
 from kivy.context import register_context
 from kivy.config import Config
 from kivy.logger import Logger
-from kivy.compat import clock as _default_time
+from time import perf_counter as _default_time
 import time
 try:
     from kivy._clock import CyClockBase, ClockEvent, FreeClockEvent, \
@@ -813,10 +813,6 @@ class ClockBaseBehavior(object):
 
         if ExceptionManager.handle_exception(e) == ExceptionManager.RAISE:
             raise
-
-
-ClockBaseBehavior.time.__doc__ = \
-    '''Proxy method for :func:`~kivy.compat.clock`. '''
 
 
 class ClockBaseInterruptBehavior(ClockBaseBehavior):

@@ -35,7 +35,6 @@ from kivy.input.provider import MotionEventProvider
 from kivy.input.motionevent import MotionEvent
 from kivy.resources import resource_find
 from kivy.utils import platform, deprecated
-from kivy.compat import unichr
 from collections import deque
 
 
@@ -343,7 +342,7 @@ class WindowSDL(WindowBase):
                         # make windows dispatch,
                         # WM_NCCALCSIZE explicitly
                         ctypes.windll.user32.SetWindowPos(
-                            self._win.get_window_info().window,
+                            self.native_handle,
                             win32con.HWND_TOP,
                             *self._win.get_window_pos(),
                             *self.system_size,
@@ -367,7 +366,6 @@ class WindowSDL(WindowBase):
 
         # auto add input provider
         Logger.info('Window: auto add sdl2 input provider')
-        from kivy.base import EventLoop
         SDL2MotionEventProvider.win = self
         EventLoop.add_input_provider(SDL2MotionEventProvider('sdl', ''))
 
@@ -398,10 +396,13 @@ class WindowSDL(WindowBase):
             try:
                 hwnd = windll.user32.GetActiveWindow()
                 self.dpi = float(windll.user32.GetDpiForWindow(hwnd))
+                self._density = self.dpi / 96
             except AttributeError:
                 pass
         else:
-            self._density = self._win._get_gl_size()[0] / self._size[0]
+            self._density = (
+                self._win.window_pixel_size[0] / self._win.window_size[0]
+            )
             if self._is_desktop:
                 self.dpi = self._density * 96.
 
@@ -450,13 +451,6 @@ class WindowSDL(WindowBase):
         else:
             Logger.warning('Window: show() is used only on desktop OSes.')
 
-    @deprecated
-    def toggle_fullscreen(self):
-        if self.fullscreen in (True, 'auto'):
-            self.fullscreen = False
-        else:
-            self.fullscreen = 'auto'
-
     def set_title(self, title):
         self._win.set_window_title(title)
 
@@ -488,6 +482,16 @@ class WindowSDL(WindowBase):
 
     def _set_window_pos(self, x, y):
         self._win.set_window_pos(x, y)
+
+    def _get_window_opacity(self):
+        return self._win.get_window_opacity()
+
+    def _set_window_opacity(self, opacity):
+        if self.opacity != opacity:
+            return self._win.set_window_opacity(opacity)
+
+    def _get_window_native_handle(self):
+        return self._win.get_native_handle()
 
     # Transparent Window background
     def _is_shaped(self):
@@ -751,7 +755,7 @@ class WindowSDL(WindowBase):
                 if (key not in self._modifiers and
                         key not in self.command_keys.keys()):
                     try:
-                        kstr_chr = unichr(key)
+                        kstr_chr = chr(key)
                         try:
                             # On android, there is no 'encoding' attribute.
                             # On other platforms, if stdout is redirected,

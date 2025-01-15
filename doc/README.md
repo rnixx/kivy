@@ -16,14 +16,17 @@ Install Sphinx
 --------------
 
 - With pip:
+  
 
   ``pip install sphinx``
 
 - With apt-get:
+    
 
   ``apt-get install python-sphinx``
 
 - With MacPorts:
+  
 
   ``port install py34-sphinx``
 
@@ -33,13 +36,8 @@ Install Sphinx
 
   To install pip, run ``python setup.py install`` in the pip directory. Now run:
 
-  ``pip install sphinxcontrib-blockdiag sphinxcontrib-seqdiag``
-
-  ``pip install sphinxcontrib-actdiag sphinxcontrib-nwdiag``
-
-  Or just use the provided *doc-requirements.txt*:
-
   ``pip install -r doc-requirements.txt``
+  
 
 Building the documentation
 --------------------------
@@ -47,3 +45,4 @@ Building the documentation
 Generate documentation using make: ``make html``.
 
 Documentation will be accessible in ``build/html/``.
+

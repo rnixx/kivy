@@ -86,7 +86,6 @@ from kivy.graphics.texture import Texture
 from kivy.core import core_select_lib
 from kivy.core.text.text_layout import layout_text, LayoutWord
 from kivy.resources import resource_find, resource_add_path
-from kivy.compat import PY2
 from kivy.setupconfig import USE_SDL2, USE_PANGOFT2
 from kivy.logger import Logger
 
@@ -185,6 +184,17 @@ class LabelBase(object):
             or `'weak_rtl'` (Pango only)
         `text_language`: str, defaults to None (user locale)
             RFC-3066 format language tag as a string (Pango only)
+        `limit_render_to_text_bbox`: bool, defaults to False. PIL only.
+            If set to ``True``, this parameter indicates that rendering should
+            be limited to the bounding box of the text, excluding any
+            additional white spaces designated for ascent and descent.
+            By limiting the rendering to the bounding box of the text, it
+            ensures a more precise alignment with surrounding elements when
+            utilizing properties such as `valign`, `y`, `pos`, `pos_hint`, etc.
+
+    .. versionadded:: 2.3.0
+        `limit_render_to_text_bbox` was added to allow to limit text rendering
+        to the text bounding box (PIL only).
 
     .. deprecated:: 2.2.0
         `padding_x` and `padding_y` have been deprecated. Please use `padding`
@@ -249,6 +259,7 @@ class LabelBase(object):
         outline_width=None, outline_color=None, font_context=None,
         font_features=None, base_direction=None, font_direction='ltr',
         font_script_name='Latin', text_language=None,
+        limit_render_to_text_bbox=False,
         **kwargs):
 
         # Include system fonts_dir in resource paths.
@@ -273,7 +284,8 @@ class LabelBase(object):
                    'base_direction': base_direction,
                    'font_direction': font_direction,
                    'font_script_name': font_script_name,
-                   'text_language': text_language}
+                   'text_language': text_language,
+                   'limit_render_to_text_bbox': limit_render_to_text_bbox}
 
         kwargs_get = kwargs.get
         options['color'] = color or (1, 1, 1, 1)
@@ -458,7 +470,7 @@ class LabelBase(object):
 
             >>> func = self._get_cached_extents()
             >>> func
-            <built-in method size of pygame.font.Font object at 0x01E45650>
+            <built-in method size of PROVIDER.font.Font object at 0x01E45650>
             >>> func('a line')
             (36, 18)
 
@@ -486,7 +498,7 @@ class LabelBase(object):
     def shorten(self, text, margin=2):
         ''' Shortens the text to fit into a single line by the width specified
         by :attr:`text_size` [0]. If :attr:`text_size` [0] is None, it returns
-        text text unchanged.
+        text unchanged.
 
         :attr:`split_str` and :attr:`shorten_from` determines how the text is
         shortened.
@@ -1053,8 +1065,7 @@ if USE_PANGOFT2:
 
 if USE_SDL2:
     label_libs += [('sdl2', 'text_sdl2', 'LabelSDL2')]
-else:
-    label_libs += [('pygame', 'text_pygame', 'LabelPygame')]
+
 label_libs += [
     ('pil', 'text_pil', 'LabelPIL')]
 Text = Label = core_select_lib('text', label_libs)
